@@ -6,16 +6,10 @@ output: html_document
 ---
 
 ```{r setup, include=FALSE}
-source("package_loader.R")
+source("scripts/00_setup.R")
 ```
 
 # DWR Grabber
-
-
-
-```{r setup, include=FALSE}
-source("scripts/package_loader.R")
-```
 
 ## DWR CLP/ BIGT sites
 
