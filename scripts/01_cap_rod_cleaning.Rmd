@@ -12,12 +12,8 @@ author-meta: "Sam Struthers"
 require("knitr")
 #change to whatever your working directory is 
 #opts_knit$set(root.dir = "~/Repositories/cameron_peak_fire_study/")
-library(tidyverse)
-library(lubridate)
-library(ggplot2)
-library(plotly)
-library(caTools)
-source("flow/first_pass.R")
+source("scripts/00_setup.R")
+walk(list.files(path = "scripts/cap_rod_functions/", full.names = TRUE), source)
 ```
 
 ## *Correcting Functions*
@@ -26,20 +22,12 @@ source("flow/first_pass.R")
 
 Link to driftR package: https://shaughnessyar.github.io/driftR/
 
-```{r driftR_source}
-source("flow/driftR_functions/dr_correctOne.R")
-source("flow/driftR_functions/dr_correctTwo.R")
-source("flow/driftR_functions/dr_drop.R")
-source("flow/driftR_functions/dr_factor.R")
-source("flow/driftR_functions/dr_read.R")
-source("flow/driftR_functions/dr_readSonde.R")
-source("flow/driftR_functions/dr_replace.R")
-source("flow/driftR_functions/notInOperator.R")
-source("flow/driftR_functions/parseTime.R")
-source("flow/driftR_functions/sondeCal.R")
-source("flow/driftR_functions/sondeClean.R")
-source("flow/driftR_functions/sondeRaw.R")
+UPDATE!
+```{r}
+
 ```
+
+
 
 ## *Importing and Combining*
 
@@ -160,23 +148,6 @@ write_csv(stage_df, "data/flow/flow_rmrs/Provisional_Q_stage_data/stage_combined
 
 ```{r}
 
-# subset stage_df to only include data from bl4
-bl4 <- stage_df %>%
-  filter(site_code == "bl4", DT < "2021-02-08 01:15:00")
-
-# create a column named last_four_measurements
-# this column will take a running average of the last 4 measurements
-# create a new column named site_visit_flag
-# if the difference between a measurement the last four.
-# if the difference is greater than the abosolute value of one 1 standard deviation, then site_visit_flag = TRUE
-# if the difference is less than the abosolute value of one 1 standard deviation, then site_visit_flag = FALSE
-# use a for loop to iterate through the data frame and create a new column called site_visit_flag
-
-bl4_cleaner <- first_pass(what = bl4,parama = "water_height_cm", max = 1000, min = -20)
-
-bl4_clean_nice <- bl4_cleaner%>%
-  mutate(flag_sd = ifelse(sd3_flag == 1, TRUE, FALSE))
-
 
 indv_visual <- bl4_clean_nice  %>%
   ggplot(aes(x = DT)) +
@@ -188,7 +159,7 @@ indv_visual <- bl4_clean_nice  %>%
              color = "purple") +
   theme_bw()
    
-ggplotly(indv_visual)
+
 
 
 ```
@@ -196,79 +167,7 @@ ggplotly(indv_visual)
 ## *Functions to subset and adjust stage values*
 
 ```{r subset_adjust_functions}
-# function to adjust sensor stage values to match the start measurement  
-
-  adjust_stage <- function(site_name, start_date, end_date,
-                           manual_start, manual_end) {
-    
-    stage_df_new <- stage_df %>%
-      # subset df by site and DTs between site visits
-     dplyr::filter(stage_df$site_code %in% site_name) %>%
-     dplyr::filter(between(DT, start_date, end_date)) %>%
-      # difference between the manual measurement and the average of 
-      # the first 4 sensor readings in the subset (i.e. the next 4
-      # sensor readings after the manual measurement)
-      mutate(adjustment = manual_start - mean(head(water_height_cm, n = 4), na.rm = TRUE) , 
-             # adjust stage by adjustment difference
-             adjusted_stage = water_height_cm + adjustment)
-    
-    return(stage_df_new)
-    
-  }
-  
-# function to give dataset a time correction factor for each subset
-    dr_factor_subset <- function(site_name, start_date, end_date, 
-                                 manual_start, manual_end) {
-      
-    factor_df <- stepped_df %>%
-      # subset df by site and DTs between site visits
-     dplyr::filter(stepped_df$site_code %in% site_name) %>%
-     dplyr::filter(between(DT, start_date, end_date)) %>%
-      # `dr_factor` needs DT to create the time factor
-      mutate(time =  format(DT, format = "%H:%M"), 
-             date = as.Date(DT, format = "%Y-%m-%d")) %>%
-      # arranging subset to correct any factor errors
-      arrange(DT) %>%
-      # create time factor for subset of data
-      dr_factor(., corrFactor = corrFac, dateVar = date, 
-                timeVar = time, keepDateTime = TRUE )
-    
-      return(factor_df)
-    
-    }
-    
-# function to correct drift over a subset by looking at measured 
-# values and the previous four readings. data frame must have corrFac column to run
-    
-    dr_correctOne_subset <- function(site_name, start_date, end_date, 
-                                     manual_end, manual_start) {
-      
-    corrected_df <- factor_df %>%
-     dplyr::filter(factor_df$site_code %in% site_name) %>%
-     dplyr::filter(between(DT, start_date, end_date))
-    
-    # average of the last 4 measurements in the subset becomes 'calVal'
-    # ie value that the sensor sees
-    
-    last_sensor_cm = mean(tail(corrected_df$adjusted_stage, n = 4), na.rm = TRUE)
-    
-     drift_corrected_df <- dr_correctOne(
-                    # dataframe to correct
-                                        corrected_df,
-                    # column that we will be correcting
-                                        sourceVar = adjusted_stage, 
-                    # column that we are creating
-                                        cleanVar = corrected_stage_cm ,
-                    # sensor value nearest to our manual measurement
-                                        calVal = last_sensor_cm , 
-                    # manual measurement that we want the subset of data to end on 
-                                        calStd = manual_end , 
-                    # time correction factor from dr_factor
-                                        factorVar = corrFac)
-    
-      return(drift_corrected_df)
-     
-  }
+# functions in subset_and_adjust.R
 ```
 
 ## *Preforming the adjustments*
@@ -446,22 +345,10 @@ flag_values<- read.csv("data/flag_values_caprods_2022.csv") %>%
   mutate(start_dt = as.POSIXct(start_dt, format = "%m/%d/%Y %H:%M", tz = "MST"),
          end_dt = as.POSIXct(end_dt, format = "%m/%d/%Y %H:%M", tz = "MST"))
 
-# subset data based on site/DTs in flag_values 
-# add flag codes and notes to df
-apply_flag <- function(site, FLAG, start_dt, end_dt, notes) {
-  
-correct_and_flagged_df <- corrected_df %>%
-  dplyr::filter(corrected_df$site_code %in% site) %>%
-  dplyr::filter(between(DT, start_dt, end_dt)) %>%
-  mutate(flag_type = FLAG, 
-         note = notes)
 
-return(correct_and_flagged_df)
-  
-}
-
+# apply flag in add flags.R
 #map over flag values df
-correct_and_flagged_df <- pmap_dfr(flag_values, apply_flag)
+correct_and_flagged_df <- pmap_dfr(flag_values, apply_flag_15min)
 
 # colors to visualize site flags in plots
 flag_colors <- c("PASS" = "green", 
@@ -558,18 +445,7 @@ flag_daily_values<- flag_values %>%
          end_date = as.Date(end_dt)) %>%
   select(site, FLAG, start_date, end_date, notes)
 
-# change apply_flag to work on daily timestep rather than by DT
-apply_flag_daily <- function(site, FLAG, start_date, end_date, notes) {
-  
-correct_and_flagged_daily_df <- daily_means_stage %>%
-  dplyr::filter(date >= start_date & date < end_date) %>%
-  dplyr::filter(site_code == site) %>%
-  mutate(flag_type = FLAG, 
-         note = notes)
-
-return(correct_and_flagged_daily_df)
-  
-}
+##### Daily flag function in `apply_daily_flag.R`
 
 # this may induce duplicates!
 correct_and_flagged_daily_df <- pmap_dfr(flag_daily_values, apply_flag_daily)
@@ -660,137 +536,8 @@ write_csv(final_daily_means_stage,
 
 5.  *EXTRAPOLATION_Q_sensor_daily*
 
-```{r Q_calc_functions}
-create_rating_curve <- function(site) {
-  
-  site_manual_h_q <- h_q_df %>%
-    dplyr::filter(site_code == site) %>%
-    mutate(logH = log10(H),
-           logQ = log10(Q))
-  
-  # create linear model based on log of both functions
-  # Q = m * H + b
-  rc_lm <- lm(logQ ~ logH, data = site_manual_h_q)
-  
-  # summary of lm created
-  # this is where coefficients will be pulled from
-  
-  # intercept == b
-  # logH == a
-  rc_summary <- summary(rc_lm)
-  
-  # pulling coefficients in to manual data frame
-    site_manual_h_q <- site_manual_h_q %>%
-      mutate(
-         # translating coefficient back into non log scale
-         a = (10 ^ (rc_summary$coefficients[1,1])),
-         # already in non log scale 
-           b = rc_summary$coefficients[2,1],
-         # r^2 value
-           r2 = rc_summary$r.squared,
-         # using calculated coefficuient on manual H values to check for accuracy
-         Q_cfs = (a*(H)^b))
-
-  return(site_manual_h_q)
-    
-}
-
-calc_Q_for_sensor_stage_15min <- function(site) {
-  
-  site_rc <- manual_H_Q_rc %>%
-    dplyr::filter(site_code == site)
-  
-  # filter corrected stage df for site
-   stage_Q_df <- final_stage_df %>%
-     dplyr::filter(site_code == site) %>%
-     # grab a, b, c and sigma for the given site from rc summary
-     mutate(a = site_rc$a[1],
-            b = site_rc$b[1],
-            r2 = site_rc$r2[1],
-            # calculate Q for the site based on a,b,c and stage given
-            Q_cfs = 
-              # if the stage is below the lowest stage where Q was measured, 
-              # make it the lowest Q value measured; extrapolation with this 
-              # few field Q's is unwise
-              ifelse(corrected_stage_cm < min(site_rc$H), min(site_rc$Q),
-             # similar idea to above but with max stage measured        
-              ifelse(corrected_stage_cm > max(site_rc$H), max(site_rc$Q),
-             # if within the bounds of measured stage values, use a & b to calc Q 
-                    (a*(corrected_stage_cm)^b))))
-  
-return(stage_Q_df)
-   
-}
-
-calc_Q_for_sensor_stage_daily <- function(site) {
-  # subset manual data by site
-  site_rc <- manual_H_Q_rc %>%
-    dplyr::filter(site_code == site)
-  
-  # filter corrected stage df for site
-  daily_stage_Q_df <- final_daily_means_stage %>%
-    dplyr::filter(site_code == site) %>%
-    # grab a, b, c and sigma for the given site from rc summary
-    mutate(a = site_rc$a[1],
-           b = site_rc$b[1],
-           r2 = site_rc$r2[1],
-          # calculate Q for the site based on a, b, c and stage given
-          Q_cfs = 
-             # if the stage is below the lowest stage where Q was measured, 
-             # make it the lowest Q value measured; extrapolation with this 
-             # few field Q's is unwise
-              ifelse(mean_corrected_stage_cm < min(site_rc$H), min(site_rc$Q),
-             # similar Idea to above but with max stage measured        
-              ifelse(mean_corrected_stage_cm >max(site_rc$H), max(site_rc$Q),
-             # if within the bounds of measured stage values, use a & b to calc Q 
-                    (a*(mean_corrected_stage_cm)^b))))
-  
-return(daily_stage_Q_df)
-  
-}
-
-
-EXTRAPOLATION_Q_sensor_15min <- function(site) {
-  
-  # subset manual data by site
-  site_rc <- manual_H_Q_rc %>%
-    dplyr::filter(site_code == site)
-  
-   # filter corrected stage df for site
-   extrapolated_stage_Q_df <- final_stage_df %>%
-     dplyr::filter(site_code == site) %>%
-     # grab a, b, c and sigma for the given site from rc summary
-     mutate(a = site_rc$a[1],
-            b = site_rc$b[1],
-            r2 = site_rc$r2[1],
-            # calculate Q for the site based on a, b, c and stage given
-            Q_cfs = (a*(corrected_stage_cm)^b))
-  
-return(extrapolated_stage_Q_df)
-   
-}
-
-EXTRAPOLATION_Q_sensor_daily <- function(site) {
-  
-  # subset manual data by site
-  site_rc <- manual_H_Q_rc %>%
-    dplyr::filter(site_code == site)
-  
-   # filter corrected stage df for site
-   daily_extrapolated_stage_Q_df <- final_daily_means_stage%>%
-     dplyr::filter(site_code == site)%>%
-     # grab a, b, c and sigma for the given site from rc summary
-     mutate(a = site_rc$a[1],
-            b = site_rc$b[1],
-            r2 = site_rc$r2[1],
-            # calculate Q for the site based on a,b,c and stage given
-            Q_cfs = (a*(mean_corrected_stage_cm)^b))
-  
-return(daily_extrapolated_stage_Q_df)
-   
-}
-
-
+```{r }
+source("scripts/cap_rod_functions/Q_calcs.R")
 
 ```
 
