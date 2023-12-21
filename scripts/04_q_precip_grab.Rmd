@@ -17,22 +17,18 @@ source("scripts/00_setup.R")
 
 
 #Station and diversion metadata
-CLP_stations <- cdssr::get_sw_stations(water_district = 3)
-CLP_diversions <- cdssr::get_structures(water_district = 3)
-bigt_stations <- cdssr::get_sw_stations(water_district = 4)
-bigt_diversions <- cdssr::get_structures(water_district = 4)
-extra_stations <- cdssr::get_sw_stations(water_district = 48)
-extra_stations_2 <- cdssr::get_sw_stations(water_district = 76)
 
-
-#Combine all diversions
-all_diversions <- rbind(bigt_diversions, CLP_diversions)%>%
+CLP_diversions <- get_structures(water_district = 3)%>%
   filter(!is.na(longdecdeg) &!is.na(longdecdeg))%>%
   filter(structure_type %in% c("STREAM GAGE","RESERVOIR SYSTEM", "MEASURING POINT", "RESERVOIR", "DITCH"))%>%
   st_as_sf(coords = c("longdecdeg", "latdecdeg"), crs = 4326)
 
+CLP_stations <- get_sw_stations(water_district = 3)
+extra_stations <- cdssr::get_sw_stations(water_district = 48)
+extra_stations_2 <- cdssr::get_sw_stations(water_district = 76)
+
 #combine all stations
-all_stations <- rbind(bigt_stations, CLP_stations, extra_stations, extra_stations_2)%>%
+all_stations <- rbind(CLP_stations, extra_stations, extra_stations_2)%>%
   filter(!is.na(longitude)&!is.na(latitude))%>%
   mutate(end_year = year(end_date),
     status = case_when(end_year >= 2022 ~ "Active",
@@ -56,14 +52,14 @@ active_dwr <- filter(all_stations,status == "Active"& data_source == "DWR")
 #Watershed areas
 
 clp <- get_huc(id = "10190007", type = "huc08")
-bigt <-get_huc(id = "10190006", type = "huc08")
+
 
 #Map!
 DWR_map <- mapview::mapview(active_usgs, col.regions = "blue", layer.name = "Active USGS Stations")+
   mapview::mapview(active_dwr, col.regions = "orange", layer.name = "Active DWR Stations")+
   mapview::mapview(filter(all_stations,status != "Active"), col.regions = "purple", layer.name = "Historical Stations")+
-  mapview::mapview(all_diversions, col.regions = "red", cex = 2, layer.name = "All Diversions")
-  # mapview::mapview(clp, col.regions = "green", layer.name = "CLP watershed")+
+  mapview::mapview(CLP_diversions, col.regions = "red", cex = 2, layer.name = "All Structures")+
+  mapview::mapview(clp, col.regions = "green", layer.name = "CLP watershed")
   # mapview::mapview(bigt, col.regions = "cyan", layer.name = "Big Thompson Watershed")
 
 
@@ -72,7 +68,7 @@ DWR_map
 ```
 
 ## Station Q
-
+### DWR
 ```{r}
 
 
@@ -82,31 +78,51 @@ station_nums<- active_dwr%>%
   st_drop_geometry()%>%
   select(station_num)%>%
   pull()
-#function to 
-grab_station_Q <- function(station_num){
-  single_site <- cdssr::get_sw_ts(station_number = station_num)
-  return(single_site)
-}
 
-active_dwr_Q <- map(station_nums, grab_station_Q)%>%
-  list_rbind()
+#Grab discharge data from DWR from active sites
 
+
+active_dwr_Q <- map_dfr(station_nums, ~get_sw_ts(station_number = .x, start_date = "2020-01-01"))
 
 #check units and type
 unique(active_dwr_Q$meas_unit)
 unique(active_dwr_Q$meas_type)
-
+unique(active_dwr_Q$abbrev)
 unique(active_dwr_Q$flag_a)
 
+cleaned_Q_dwr <- active_dwr_Q%>%
+  filter(value >= 0)
+```
+## USGS
+```{r}
 
-cleaned_Q <- active_dwr_Q%>%
+
+
+#Grab active site numbers
+station_nums<- active_usgs%>%
+  st_drop_geometry()%>%
+  select(station_num)%>%
+  pull()
+
+#Grab discharge data from DWR from active sites
+
+
+active_usgs_Q <- map_dfr(station_nums, ~get_sw_ts(station_number = .x, start_date = "2020-01-01"))
+
+#check units and type
+unique(active_usgs_Q$meas_unit)
+unique(active_usgs_Q$meas_type)
+unique(active_usgs_Q$abbrev)
+unique(active_usgs_Q$flag_a)
+
+cleaned_Q_usgs <- active_usgs_Q%>%
   filter(value >= 0)
 ```
 
 # Plotting DWR Data
 
 ```{r}
-
+cleaned_Q <- bind_rows(cleaned_Q_usgs, cleaned_Q_dwr)
 
 
 DWR_station_plot <- cleaned_Q %>%
@@ -115,8 +131,8 @@ DWR_station_plot <- cleaned_Q %>%
   theme_bw()+
   ylab("Daily Q cfs")+
   xlab("Date")+
-  # scale_y_log10()+
-   facet_wrap(~abbrev)
+  #scale_y_log10()+
+  facet_wrap(~abbrev)
 plot(DWR_station_plot)
 
 ```
@@ -125,7 +141,7 @@ Exporting active DWR sites
 
 ```{r}
 
-write_feather(active_dwr_Q, sink = "data/Q_modeling/active_DWR_020723")
+write_feather(cleaned_Q, sink = "data/dwr_usgs_Q_2020_2023")
 
 ```
 
@@ -150,9 +166,9 @@ create_meta_url <- function(site_num){
 
 #Create urls for Q or other sensor pulling
 create_data_url <- function(site_num){
-  end_dt <- "2023-01-24T13:30:00-07:00"
+  end_dt <- "2023-12-00T13:30:00-07:00"
   start_url <- "https://larimerco-ns5.trilynx-novastar.systems/novastar/data/api/v1/stationSummaries?forOperatorStationDashboard=true&stationNumId="
-  mid_url <- "&periodStart=2021-01-01T00:00:00-07:00&periodEnd="
+  mid_url <- "&periodStart=2020-01-01T00:00:00-07:00&periodEnd="
   
   final_url <- tibble( site_number = site_num, 
                       site_url = paste0(start_url, site_num, mid_url, end_dt))
@@ -169,23 +185,14 @@ clp_Q_site_nums <- tibble(station_ids = c("11531", "11530", "11525",
                     "11518", "11517", "11516",
                     "6770", "11083", "11082",
                     "11009","7130","10408", "11021"))
-bigt_Q_site_nums <- tibble(station_ids = c("11567","11566","11564",
-                                           "11563","11562","11561",
-                                           "11560", "11559","11558",
-                                          "95100", "95000","3640",
-                                          "3610","3570","3520" ))
-
 
 #Meta URLs
 clp_meta_url <- map_dfr(clp_Q_site_nums, create_meta_url)%>%
   as.data.frame()
-bigt_meta_url <- map_dfr(bigt_Q_site_nums, create_meta_url)%>%
-  as.data.frame()
+
 
 #Data URLs
 clp_data_url <- map_dfr(clp_Q_site_nums, create_data_url)%>%
-  as.data.frame()
-bigt_data_url <- map_dfr(bigt_Q_site_nums, create_data_url)%>%
   as.data.frame()
 
 ```
@@ -231,10 +238,10 @@ get_station_meta <- function(site_meta_url, site_number){
 
 #maps to get all metadata/ location of all sensors within JSON
 clp_station_meta <- map2_dfr(clp_meta_url$site_url, clp_meta_url$site_number, get_station_meta)
-bigt_station_meta <- map2_dfr(bigt_meta_url$site_url, bigt_meta_url$site_number, get_station_meta)
+
 
 #create a total meta_df that can be referenced in downloading functions later on
-final_meta <- rbind(clp_station_meta, bigt_station_meta)
+final_meta <- clp_station_meta
 ```
 
 # Q pull
@@ -276,16 +283,16 @@ download_q <- function(site_url, site_number) {
   
   return(q_df)
   
-   Sys.sleep(2)
+   #Sys.sleep(2)
    
   
 }
 
-site_url <- "https://larimerco-ns5.trilynx-novastar.systems/novastar/data/api/v1/stationSummaries?forOperatorStationDashboard=true&stationNumId=11531&periodStart=2022-01-25T13:59:00-07:00&periodEnd=2023-01-26T13:59:00-07:00"
- site_number <- "11531"
+test_site_url <- "https://larimerco-ns5.trilynx-novastar.systems/novastar/data/api/v1/stationSummaries?forOperatorStationDashboard=true&stationNumId=11531&periodStart=2022-01-25T13:59:00-07:00&periodEnd=2023-12-26T13:59:00-07:00"
+test_site_number <- "11531"
 #
  
- test_q_df <- download_q( test_site_url,  test_site_number)
+ test_q_df <- download_q(site_url = test_site_url,  site_number = test_site_number)
  
 # df_11531 <- download_q(site_url = clp_data_url_test$site_url[1],site_number = clp_data_url_test$site_number[1])
 # df_11530 <- download_q(site_url = clp_data_url_test$site_url[2],site_number = clp_data_url_test$site_number[2])
@@ -299,9 +306,10 @@ site_url <- "https://larimerco-ns5.trilynx-novastar.systems/novastar/data/api/v1
 #maps to get all metadata/ location of all sensors within JSON
 clp_data_url_test <- head(clp_data_url, 2)
 
-clp_q_station_data <- map2_dfr(clp_data_url_test$site_url, clp_data_url_test$site_number, download_q)
+clp_q_station_data <- map2(clp_data_url$site_url, clp_data_url$site_number, download_q)%>%
+  list_rbind()
 
-bigt_q_station_data <- map2_dfr(bigt_meta_url$site_url, bigt_meta_url$site_num, get_station_meta)
+?map2_dfr()
 
 ```
 
