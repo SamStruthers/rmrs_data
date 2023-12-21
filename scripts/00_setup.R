@@ -25,6 +25,13 @@ pack_req <- c(
 package_load(pack_req)
 
 
+# install.packages("devtools")
+devtools::install_github("shaughnessyar/driftR",quiet = TRUE)
+library(driftR)
+
+# install.packages("devtools")
+devtools::install_github("anguswg-ucsb/cdssr",quiet = TRUE)
+library(cdssr)
 
 remove(pack_req, package_load)
 #Simple function to negate %in%
