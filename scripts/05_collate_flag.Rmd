@@ -6,5 +6,85 @@ output: html_document
 ---
 
 ```{r setup, include=FALSE}
-source("package_loader.R")
+source("scripts/00_setup.R")
 ```
+
+# Grab each type of data
+- Cap rod
+- DO
+- ISCO
+
+## ISCO
+### Read in data
+```{r}
+source("scripts/02_ISCO_binder.R")
+# THIS WILL BREAK IF YOU HAVE A FILE OPEN in excel
+raw_isco_files <- list.files(path = "data/raw/ISCO/",full.names = TRUE)
+
+all_isco <- map_dfr(raw_isco_files, read_isco_file) 
+rm(raw_isco_files)
+```
+### Visualize
+
+```{r}
+isco_long <- all_isco%>%
+  pivot_longer(cols = c(temp_c,sc_us, cdom_ave, cdom, turb_ave, turb), names_to = "parameter", values_to = "value")
+
+ggplot(isco_long, aes(x= DT_round_mst, y= value, color= parameter))+
+  geom_line()+
+  geom_smooth()+
+  facet_wrap(~parameter, scales = "free_y")
+```
+
+
+
+
+## DO
+```{r}
+#source script with DO binder function
+source("scripts/03_miniDOT_binder.R")
+
+#Raw DO folder paths
+raw_do_dir <- list.files(path = "data/raw/DO", full.names = TRUE)
+# Run all filepaths thru dot puller
+do_collated <- map_dfr(.x = raw_do_dir, .f = dot_puller)%>%
+  # Convert from UTC to MST timezone
+  mutate(DT_mst = with_tz(DT_utc, tzone = "MST"), 
+         # round this date to 5 min to be matched downstream
+          DT_round_mst = floor_date(DT_mst, "5 minutes"), 
+         #add date column
+         date = as.Date(DT_round_mst))
+```
+## Check DO
+
+```{r}
+DO_plot <- ggplot(do_collated, aes(x= DT_mst, y= DO_mgL, color= Site))+
+  geom_line()+
+  geom_smooth()
+
+#ggplotly(DO_plot)
+```
+
+# Collate all data
+
+```{r}
+
+all_data <- do_collated%>%
+  left_join(ISCO_collated, by = "DT_round_mst")
+```
+
+
+# Daily Conversion
+ Convert the entire dataframe to daily values
+```{r}
+
+all_data_daily <- all_data%>%
+  group_by(date, Site)%>%
+  summarise(
+    mean_do_mgL = mean(DO_mgL, na.rm = TRUE), 
+    mean_temp_c = mean(Temp_C, na.rm = TRUE)
+  )
+
+```
+
+
