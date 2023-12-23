@@ -13,7 +13,7 @@ package_load <- function(package_names){
 #vector of packages
 pack_req <- c( 
   # data wrangling packages
-  "tidyverse","lubridate","padr","janitor","padr", "broom","arrow",
+  "tidyverse","lubridate","padr","janitor","padr", "broom","arrow","readxl",
   #spatial packages
   "sf","terra","nhdplusTools", "tigris","raster", "leaflet","tmap",
   # plotting
