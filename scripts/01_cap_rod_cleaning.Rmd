@@ -9,22 +9,11 @@ author-meta: "Sam Struthers"
 ## *Packages*
 
 ```{r setup}
-require("knitr")
+
 #change to whatever your working directory is 
 #opts_knit$set(root.dir = "~/Repositories/cameron_peak_fire_study/")
 source("scripts/00_setup.R")
 walk(list.files(path = "scripts/cap_rod_functions/", full.names = TRUE), source)
-```
-
-## *Correcting Functions*
-
-*'driftR\` package is not up to date with Rstudio so I am sourcing the functions from a folder called driftR_functions in the src folder:*
-
-Link to driftR package: https://shaughnessyar.github.io/driftR/
-
-UPDATE!
-```{r}
-
 ```
 
 
@@ -71,13 +60,42 @@ UPDATE!
 
 ```{r import_sensor_manual}
 # location of raw data files
-folder_path <- paste0(getwd(),"/data/flow/all_sites_caprod_data")
+folder_path <- "data/raw/cap_rod/"
 
+
+import_cap_rod <- function(folder_path){
+  #get all the filenames in the folder
+ filenames <-  list.files(folder_path, recursive = TRUE, full.names = TRUE)
+ 
+ grab_data <- function(file_name){
+   #grab site name from filename
+    file_parts <- strsplit(file_name, "/")[[1]]
+  site <- strsplit(file_parts[5], "_")[[1]][1]
+  #read in data
+  stage_df <- read_xlsx(file_name)%>%
+  #add site name to dataset
+    mutate(site_code = site, 
+           #convert datetime to DT object for R
+           # will only work in some formats
+           DT_1stpass = parse_date_time(datetime, orders = c("dmY HMS","dmy HMS",  "mdY HM"), tz = "MST" ), 
+           #some dates are still numeric due to excel error
+           #correcting those here with an ifelse (case_when)
+           DT_final = case_when(is.na(DT_1stpass) ~ with_tz(as.POSIXct((as.numeric(datetime) * 86400), origin = "1899-12-30 6:30:01",  tz = "UTC"), tzone = "MST"), 
+           #if it is not NA (parsed correctly in first pass, grab value from 1st pass)
+           TRUE  ~ DT_1stpass))
+ }
+all_stage <- map_dfr(filenames, grab_data)
+ 
+ 
+ return(all_stage)
+}
+
+
+tester <- ggplot(filter(all_stage, site_code == "SAWM"), aes(x = DT_final, y = wtemp_p_1))+
+  geom_point()
 # combine all sites into one data frame:
-stage_df <- read_csv(list.files(folder_path, 
-                                recursive = TRUE, 
-                                full.names = TRUE), 
-                     id = "path") %>%
+stage_df <- read_xlsx() 
+%>%
   mutate(site_code = substr(path, nchar(path) - 17 + 1, nchar(path)),
          site_code = substr(site_code, 1, 4),
          DT =  as.POSIXct(datetime, format = "%m/%d/%Y %H:%M", tz = "MST")) %>%
@@ -102,7 +120,6 @@ manual_measurements <- read.csv(field_stage) %>%
          last_measurement_DT = as.POSIXct(last_measurement_DT, 
                                           format = "%m/%d/%Y %H:%M", tz = "MST"))
 ```
-
 
 ## *Visual*
 
@@ -133,7 +150,6 @@ ggplotly(indv_visual)
 ```{r compiled_export}
 write_csv(stage_df, "data/flow/flow_rmrs/Provisional_Q_stage_data/stage_combined_UNCLEAN.csv")
 ```
-
 
 # *Field data adjustments*
 
@@ -198,7 +214,6 @@ factor_df <- pmap_dfr(manual_measurements_for_func, dr_factor_subset)
 # using factor and last 4 measurements from manual end, corrects for drift so that the manual end and the end measurement match up
 corrected_df <- pmap_dfr(manual_measurements_for_func, dr_correctOne_subset)
 ```
-
 
 ### *Graphing to check work*
 
@@ -391,8 +406,6 @@ write.csv(final_stage_df,
 
 ```
 
-
-
 ## *Computing daily averages*
 
 ```{r daily_mean}
@@ -474,8 +487,6 @@ plot(sample_plot)
 
 ```
 
-
-
 ## *Exporting corrected daily means data*
 
 ```{r export_daily}
@@ -495,8 +506,6 @@ final_daily_means_stage <- daily_means_stage_w_samples %>%
 write_csv(final_daily_means_stage, 
           "data/Provisional_Q_stage_data/stage_daily_mean_and_samples_cleaned_KAMPF_EXAMPLE.csv")
 ```
-
-
 
 # *Calculating Q*
 
@@ -623,8 +632,6 @@ r2_values <- dplyr::select(manual_H_Q_rc, c(site_code, r2))%>%
 head(r2_values)
 ```
 
-
-
 ## *15 min Q calculations*
 
 ```{r 15min_Q}
@@ -659,7 +666,6 @@ extrapolated_stage_Q <-
 
 plot(extrapolated_stage_Q)
 ```
-
 
 ## *Daily Q calculations*
 
@@ -696,8 +702,6 @@ extrapolated_stage_Q <-
 ggplotly(extrapolated_stage_Q)
 ```
 
-
-
 # *Exporting Q files*
 
 *Save into folder "data/Provisional_Q_stage_data"*
@@ -717,7 +721,5 @@ write_csv(EXTRAPOLATED_stage_Q_15min,
 write_csv(EXTRAPOLATED_stage_Q_daily, 
           paste0(folder, "EXTRAPOLATED_stage_Q_daily_CPF2022.csv"))
 ```
-
-
 
 *End*
