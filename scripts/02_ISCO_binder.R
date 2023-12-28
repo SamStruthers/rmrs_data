@@ -31,7 +31,8 @@ read_isco_file <- function(raw_isco_filepath){
       # round this date to 5 min to be matched downstream
       DT_round_mst = floor_date(DT_mst, "5 minutes"), 
       Site = site
-    )
+    )%>%
+    select(-c(temp_c, timestamp, DT_mst))
   
   return(isco_data_concise)
 }

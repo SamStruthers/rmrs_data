@@ -28,7 +28,7 @@ rm(raw_isco_files)
 
 ```{r}
 isco_long <- all_isco%>%
-  pivot_longer(cols = c(temp_c,sc_us, cdom_ave, cdom, turb_ave, turb), names_to = "parameter", values_to = "value")
+  pivot_longer(cols = c(ISCO_temp_c,sc_us, cdom_ave, cdom, turb_ave, turb), names_to = "parameter", values_to = "value")
 
 ggplot(isco_long, aes(x= DT_round_mst, y= value, color= parameter))+
   geom_line()+
@@ -47,18 +47,12 @@ source("scripts/03_miniDOT_binder.R")
 #Raw DO folder paths
 raw_do_dir <- list.files(path = "data/raw/DO", full.names = TRUE)
 # Run all filepaths thru dot puller
-do_collated <- map_dfr(.x = raw_do_dir, .f = dot_puller)%>%
-  # Convert from UTC to MST timezone
-  mutate(DT_mst = with_tz(DT_utc, tzone = "MST"), 
-         # round this date to 5 min to be matched downstream
-          DT_round_mst = floor_date(DT_mst, "5 minutes"), 
-         #add date column
-         date = as.Date(DT_round_mst))
+all_do <- map_dfr(.x = raw_do_dir, .f = dot_puller)
 ```
 ## Check DO
 
 ```{r}
-DO_plot <- ggplot(do_collated, aes(x= DT_mst, y= DO_mgL, color= Site))+
+DO_plot <- ggplot(all_do, aes(x= DT_mst, y= DO_mgL, color= Site))+
   geom_line()+
   geom_smooth()
 
@@ -69,8 +63,39 @@ DO_plot <- ggplot(do_collated, aes(x= DT_mst, y= DO_mgL, color= Site))+
 
 ```{r}
 
-all_data <- do_collated%>%
-  left_join(ISCO_collated, by = "DT_round_mst")
+# List all sites to be processed below
+sites <- c("SAWM")
+
+create_all_data <- function(site_name){
+start_date <- as.POSIXct("2023-01-01 00:00:00", tz = "MST")
+end_date <- as.POSIXct("2023-12-31 23:55:00", tz = "MST")
+
+site_data <- tibble(
+  Site = site_name,
+  DT_round_mst = seq(start_date, end_date, by = "5 min"))
+
+return(site_data)
+}
+
+all_data <- map_dfr(sites, create_all_data)%>%
+  left_join(all_isco, by = c("Site", "DT_round_mst"))%>%
+  left_join(all_do, by = c("Site", "DT_round_mst"))%>%
+  filter(rowSums(!is.na(select(., -Site, -DT_round_mst))) > 0)%>%
+  mutate(date = as.Date(DT_round_mst))
+  
+
+```
+
+### Plot
+
+```{r}
+
+
+
+temp_test <- ggplot(data = temp_test, aes(x= DT_round_mst))+
+  geom_line( aes( y= temp_diff), color = "blue")
+
+ggplotly(temp_test)
 ```
 
 

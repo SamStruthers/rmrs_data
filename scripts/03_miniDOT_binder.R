@@ -14,20 +14,24 @@ dot_puller <- function(raw_folder_path){
                 janitor::row_to_names(row_number=1) %>%
               # convert columns to what parameter they are
                 select(seconds=1,
-                       Temp_C=3,
+                       minidot_temp_C=3,
                        DO_mgL=4) %>%
               #Convert seconds column to DT utc
                 mutate(DT_utc=as_datetime(as.numeric(seconds), tz = "UTC"),
                        #Grab site from above
                        Site = site,
                        #convert temp and do to numeric values rather than characters
-                       Temp_C=as.numeric(Temp_C),
+                       minidot_temp_C=as.numeric(minidot_temp_c),
                        DO_mgL=as.numeric(DO_mgL))})
 
   # Combine all individual text files to a single dataframe
    combined_do <- do.call("rbind", lapply(txt_files, as.data.frame))%>%
+     # Convert from UTC to MST timezone
+     mutate(DT_mst = with_tz(DT_utc, tzone = "MST"), 
+            # round this date to 5 min to be matched downstream
+            DT_round_mst = floor_date(DT_mst, "5 minutes"))%>%
   #remove the seconds column
-                  select(-seconds)
+                  select(-c(seconds, DT_utc, DT_mst))
   #Save to CSV for future use
    write_csv(combined_do, paste0("data/cleaned/", site,'_miniDOT_data.csv'))
     #write_rds(x = combined_do, file =paste0("data/cleaned/", site,'_miniDOT_data.RDS' ))
