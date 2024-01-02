@@ -21,7 +21,7 @@ pack_req <- c(
   # web scrapping
   "rjson", "rvest", "dataRetrieval", "httr", "jsonlite",
   #extra
-  "devtools", "trend")
+  "devtools", "trend", "rmarkdown")
 package_load(pack_req)
 
 
