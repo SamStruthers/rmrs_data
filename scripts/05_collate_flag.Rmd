@@ -6,6 +6,7 @@ output: html_document
 ---
 
 ```{r setup, include=FALSE}
+
 source("scripts/00_setup.R")
 ```
 
@@ -13,6 +14,13 @@ source("scripts/00_setup.R")
 - Cap rod
 - DO
 - ISCO
+
+## Cap Rod
+
+```{r}
+#render("scripts/01_cap_rod_cleaning.Rmd")
+```
+
 
 ## ISCO
 ### Read in data
@@ -30,10 +38,12 @@ rm(raw_isco_files)
 isco_long <- all_isco%>%
   pivot_longer(cols = c(ISCO_temp_c,sc_us, cdom_ave, cdom, turb_ave, turb), names_to = "parameter", values_to = "value")
 
-ggplot(isco_long, aes(x= DT_round_mst, y= value, color= parameter))+
+plot <- ggplot(isco_long, aes(x= DT_round_mst, y= value, color= Site))+
   geom_line()+
-  geom_smooth()+
+  #geom_smooth()+
   facet_wrap(~parameter, scales = "free_y")
+
+ggplotly(plot)
 ```
 
 
@@ -52,11 +62,11 @@ all_do <- map_dfr(.x = raw_do_dir, .f = dot_puller)
 ## Check DO
 
 ```{r}
-DO_plot <- ggplot(all_do, aes(x= DT_mst, y= DO_mgL, color= Site))+
+DO_plot <- ggplot(all_do, aes(x= DT_round_mst, y= DO_mgL, color= Site))+
   geom_line()+
   geom_smooth()
 
-#ggplotly(DO_plot)
+ggplotly(DO_plot)
 ```
 
 # Collate all data
@@ -64,7 +74,7 @@ DO_plot <- ggplot(all_do, aes(x= DT_mst, y= DO_mgL, color= Site))+
 ```{r}
 
 # List all sites to be processed below
-sites <- c("SAWM")
+sites <- c("SAWM","FISH", "LBEA", "BLAK" )
 
 create_all_data <- function(site_name){
 start_date <- as.POSIXct("2023-01-01 00:00:00", tz = "MST")
@@ -107,9 +117,54 @@ all_data_daily <- all_data%>%
   group_by(date, Site)%>%
   summarise(
     mean_do_mgL = mean(DO_mgL, na.rm = TRUE), 
-    mean_temp_c = mean(Temp_C, na.rm = TRUE)
+    mean_minidot_temp_c = mean(minidot_temp_c, na.rm = TRUE), 
+    mean_ISCO_temp_c = mean(ISCO_temp_c, na.rm = TRUE),
+    mean_sc_us  = mean(sc_us, na.rm = TRUE)
   )
 
+
+
 ```
+
+# Viewing results
+```{r}
+plot <- ggplot(all_data_daily, aes(x = date)) +
+  geom_point(aes(y = mean_minidot_temp_c, color = "Minidot Temp"), size = 1) +
+  geom_point(aes(y = mean_ISCO_temp_c, color = "ISCO Temp"), size = 1) +
+  labs(x = "Date",
+       y = "Mean temp") +
+  scale_color_manual(values = c("Minidot Temp" = "red", "ISCO Temp" = "blue")) +
+  theme_minimal()+
+  facet_wrap(~Site)
+ggplotly(plot)
+```
+
+```{r}
+
+# Filter data for the same site and on the same day
+same_day_data <- all_data_daily %>%
+  filter(!is.na(mean_minidot_temp_c) & !is.na(mean_ISCO_temp_c)) %>%
+  select(Site, date, mean_minidot_temp_c, mean_ISCO_temp_c)
+
+# Fit a linear model
+lm_model <- lm(mean_ISCO_temp_c ~ mean_minidot_temp_c, data = same_day_data)
+
+# Print summary of the linear model
+summary(lm_model)
+
+
+# Scatter plot with regression line
+ggplot(same_day_data, aes(x = mean_minidot_temp_c, y = mean_ISCO_temp_c)) +
+  geom_point(aes(color = Site)) +
+  #geom_smooth(method = "lm", se = FALSE, color = "blue") +  # Add a linear regression line
+  geom_abline(intercept = 0, slope = 1, linetype = "dashed", color = "red") +  # Add a 1:1 line
+  labs(title = "Linear Model: Minidot vs. Isco Temperature",
+       x = "Minidot Temperature (°C)",
+       y = "Isco Temperature (°C)") +
+  theme_minimal()
+
+```
+
+
 
 
