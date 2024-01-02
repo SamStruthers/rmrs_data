@@ -16,8 +16,6 @@ source("scripts/00_setup.R")
 walk(list.files(path = "scripts/cap_rod_functions/", full.names = TRUE), source)
 ```
 
-
-
 ## *Importing and Combining*
 
 *RULES:*
@@ -40,85 +38,52 @@ walk(list.files(path = "scripts/cap_rod_functions/", full.names = TRUE), source)
 
 7.  *Manual Measurements need the columns:*
 
-    1.  *first_measurement_DT: 1st site visit datetime*
+    1.  *DT: site visit datetime*
 
-        1.  *In same tz as sensor data*
+    2.  *H_cm: site visit stage measurement*
 
-    2.  *last_measurement_DT: 2nd site visit*
+        1.  This is a absolute value, if sediment has filled in 10 cm and stage plate is reading 20, you use 10 as the H_cm value
 
-        1.  *This becomes first_measurement_DT in next column*
+    3.  Q_cfs: Computed discharge
 
-    3.  *first_measurement_cm: 1st site visit stage measurement*
-
-        1.  *cm or whatever units you want the sensor in*
-
-    4.  *last_measurement_cm: 2nd site visit stage measurement*
-
-    5.  *optional columns : Q_cfs and notes*
+    4.  *optional columns : notes*
 
         1.  *Q_cfs is read in a different chunk*
 
-```{r import_sensor_manual}
+```{r import_sensor_data}
 # location of raw data files
 folder_path <- "data/raw/cap_rod/"
 
 
-import_cap_rod <- function(folder_path){
-  #get all the filenames in the folder
- filenames <-  list.files(folder_path, recursive = TRUE, full.names = TRUE)
- 
- grab_data <- function(file_name){
-   #grab site name from filename
-    file_parts <- strsplit(file_name, "/")[[1]]
-  site <- strsplit(file_parts[5], "_")[[1]][1]
-  #read in data
-  stage_df <- read_xlsx(file_name)%>%
-  #add site name to dataset
-    mutate(site_code = site, 
-           #convert datetime to DT object for R
-           # will only work in some formats
-           DT_1stpass = parse_date_time(datetime, orders = c("dmY HMS","dmy HMS",  "mdY HM"), tz = "MST" ), 
-           #some dates are still numeric due to excel error
-           #correcting those here with an ifelse (case_when)
-           DT_final = case_when(is.na(DT_1stpass) ~ with_tz(as.POSIXct((as.numeric(datetime) * 86400), origin = "1899-12-30 6:30:01",  tz = "UTC"), tzone = "MST"), 
-           #if it is not NA (parsed correctly in first pass, grab value from 1st pass)
-           TRUE  ~ DT_1stpass))
- }
-all_stage <- map_dfr(filenames, grab_data)
- 
- 
- return(all_stage)
-}
+# The function `import_cap_rod.R`, given a folder_path, will collate all stage data into a single data frame
+# Make sure each file starts with the site name and is proceeded by a underscore
+# Excel likes to mess with datetimes so check the data in excel first, if needing to, correcting the date time to the format: m/d/yy HH:MM
+#Also make sure all the datasets have the same datetime column and set it below in date_time_col
+date_time_col <- "correct_time"
+
+# map over the folder path
+stage_df <- import_cap_rod(folder_path = folder_path)
 
 
-tester <- ggplot(filter(all_stage, site_code == "SAWM"), aes(x = DT_final, y = wtemp_p_1))+
-  geom_point()
-# combine all sites into one data frame:
-stage_df <- read_xlsx() 
-%>%
-  mutate(site_code = substr(path, nchar(path) - 17 + 1, nchar(path)),
-         site_code = substr(site_code, 1, 4),
-         DT =  as.POSIXct(datetime, format = "%m/%d/%Y %H:%M", tz = "MST")) %>%
-  select(DT, site_code, wtrhgt__5) %>%
-  # mutate column to correct units and name
-  mutate(water_height_cm = wtrhgt__5 /10, 
-        time =  format(DT, format = "%H:%M"), 
-        # in case excess chars for site_code remain
-        site_code = str_extract(string = site_code, 
-                                      pattern = "[A-Z]+")) %>%
-  # rename raw mm data
-  dplyr ::rename(water_height_mm = wtrhgt__5)
+```
+
+## Importing manually recorded values
+
+```{r import_manual_data}
+
   
 ##  FIELD STAGE MEASUREMENTS. SEE RULES FOR COLUMNS NAMES ##
 # change "field stage" to wherever manual values are stored:
-field_stage <- "data/flow_rmrs/manual_values_dec_2022.csv"
+field_stage <- "data/raw/manual_stage_2023.xlsx"
 
-manual_measurements <- read.csv(field_stage) %>%
-  mutate(first_measurement_DT = as.POSIXct(first_measurement_DT, 
-                                           # adjust DT formatting if necessary
-                                           format = "%m/%d/%Y %H:%M", tz = "MST"), 
-         last_measurement_DT = as.POSIXct(last_measurement_DT, 
-                                          format = "%m/%d/%Y %H:%M", tz = "MST"))
+manual_measurements <- read_xlsx(field_stage)%>%
+  format_manual_stage()
+
+old_measurements <- "manual_values_dec_2022"
+
+# Join both? or just bring it when calculating rating curves
+
+
 ```
 
 ## *Visual*
@@ -126,19 +91,21 @@ manual_measurements <- read.csv(field_stage) %>%
 -   *Check for missing data, weird dates, see if there are any 0s near site visits.*
 
 ```{r pre_clean_visual}
+
+
 master_visual <- stage_df %>%
-  ggplot(aes(x = DT, y = water_height_cm, color = site_code)) +
+  ggplot(aes(x = DT, y = water_height_cm_inst, color = site_code)) +
   geom_line()+
-  geom_point(data = manual_measurements, aes(x = first_measurement_DT, 
-                                                  y = first_measurement_cm, color = site_code)) +
+  # geom_point(data = manual_meass, aes(x = first_meas_DT, 
+  #                                                 y = first_meas_cm, color = site_code)) +
   theme_bw()
-plot(master_visual)
+ggplotly(master_visual)
 
 indv_visual <- filter(stage_df, site_code == "bl4") %>%
   ggplot(aes(x = DT, y = water_height_cm, color = site_code)) +
   geom_line()+
-  geom_point(data = filter(manual_measurements, site_code == "bl4"), aes(x = first_measurement_DT, 
-                                                  y = first_measurement_cm),
+  geom_point(data = filter(manual_meass, site_code == "bl4"), aes(x = first_meas_DT, 
+                                                  y = first_meas_cm),
              color = "blue") +
   theme_bw()
    
@@ -170,8 +137,8 @@ indv_visual <- bl4_clean_nice  %>%
   geom_point(aes(y = p1, color = flag_sd))+
   scale_color_manual(values = c( "TRUE"="cyan", "FALSE" = "black" ))+
   geom_point(data = filter(manual_measurements, site_code == "bl4"),
-             aes(x = first_measurement_DT, 
-                y = first_measurement_cm),
+             aes(x = first_meas_DT, 
+                y = first_meas_cm),
              color = "purple") +
   theme_bw()
    
@@ -194,10 +161,10 @@ indv_visual <- bl4_clean_nice  %>%
 # fit column names to match argument names in functions
 manual_measurements_for_func <- manual_measurements %>% 
   dplyr::select(site_name = site_code, 
-         start_date = first_measurement_DT,
-         end_date = last_measurement_DT,
-         manual_start = first_measurement_cm, 
-         manual_end = last_measurement_cm) %>%
+         start_date = first_meas_DT,
+         end_date = last_meas_DT,
+         manual_start = first_meas_cm, 
+         manual_end = last_meas_cm) %>%
   # NA values will break the functions, get rid of em!
   na.omit() %>%
   # pmap_dfr needs tibbles :)
