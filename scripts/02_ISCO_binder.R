@@ -33,6 +33,9 @@ read_isco_file <- function(raw_isco_filepath){
       Site = site
     )%>%
     select(-c(temp_c, timestamp, DT_mst))
+  #save collated data
+  write_csv(isco_data_concise, paste0("data/collated/", site, "isco_data_2023.csv"))
+  write_rds(isco_data_concise, paste0("data/collated/", site, "isco_data_2023.RDS"))
   
   return(isco_data_concise)
 }

@@ -33,7 +33,7 @@ dot_puller <- function(raw_folder_path){
   #remove the seconds column
                   select(-c(seconds, DT_utc, DT_mst))
   #Save to CSV for future use
-   write_csv(combined_do, paste0("data/cleaned/", site,'_miniDOT_data.csv'))
+   write_csv(combined_do, paste0("data/collated/", site,'_miniDOT_data.csv'))
     #write_rds(x = combined_do, file =paste0("data/cleaned/", site,'_miniDOT_data.RDS' ))
     return(combined_do)
 }
