@@ -5,23 +5,21 @@ dot_puller <- function(raw_folder_path){
   txt_files_ls = list.files(path=paste0(raw_folder_path), pattern="*.txt", full.names=T, recursive = T)
   
   # Grab the site name from the file path
-  file_parts <- strsplit(txt_files_ls, "/")[[1]]
-  site <- file_parts[4]
-  
-  
+  file_parts <- strsplit(raw_folder_path, "/")[[1]]
+  site <-  strsplit(file_parts[4], "_")[[1]][1]
   # Read the text files in
    txt_files <- lapply(txt_files_ls, function(x) {read.delim(file = x, header = F, sep =",", dec=".") %>% slice(-1:-2) %>%
                 janitor::row_to_names(row_number=1) %>%
               # convert columns to what parameter they are
                 select(seconds=1,
-                       minidot_temp_C=3,
+                       minidot_temp_c=3,
                        DO_mgL=4) %>%
               #Convert seconds column to DT utc
                 mutate(DT_utc=as_datetime(as.numeric(seconds), tz = "UTC"),
                        #Grab site from above
                        Site = site,
                        #convert temp and do to numeric values rather than characters
-                       minidot_temp_C=as.numeric(minidot_temp_c),
+                       minidot_temp_c=as.numeric(minidot_temp_c),
                        DO_mgL=as.numeric(DO_mgL))})
 
   # Combine all individual text files to a single dataframe
