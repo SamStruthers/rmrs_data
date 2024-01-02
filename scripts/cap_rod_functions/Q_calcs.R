@@ -2,8 +2,8 @@ create_rating_curve <- function(site) {
   
   site_manual_h_q <- h_q_df %>%
     dplyr::filter(site_code == site) %>%
-    mutate(logH = log10(H),
-           logQ = log10(Q))
+    mutate(logH = log10(H_cm),
+           logQ = log10(Q_cfs))
   
   # create linear model based on log of both functions
   # Q = m * H + b
@@ -26,12 +26,13 @@ create_rating_curve <- function(site) {
       # r^2 value
       r2 = rc_summary$r.squared,
       # using calculated coefficuient on manual H values to check for accuracy
-      Q_cfs = (a*(H)^b))
+      calc_Q_cfs = (a*(H_cm)^b))
   
   return(site_manual_h_q)
   
 }
 
+#INST values
 calc_Q_for_sensor_stage_15min <- function(site) {
   
   site_rc <- manual_H_Q_rc %>%
@@ -49,9 +50,9 @@ calc_Q_for_sensor_stage_15min <- function(site) {
              # if the stage is below the lowest stage where Q was measured, 
              # make it the lowest Q value measured; extrapolation with this 
              # few field Q's is unwise
-             ifelse(corrected_stage_cm < min(site_rc$H), min(site_rc$Q),
+             ifelse(corrected_stage_cm < min(site_rc$H_cm), min(site_rc$Q_cfs),
                     # similar idea to above but with max stage measured        
-                    ifelse(corrected_stage_cm > max(site_rc$H), max(site_rc$Q),
+                    ifelse(corrected_stage_cm > max(site_rc$H_cm), max(site_rc$Q_cfs),
                            # if within the bounds of measured stage values, use a & b to calc Q 
                            (a*(corrected_stage_cm)^b))))
   
@@ -59,6 +60,7 @@ calc_Q_for_sensor_stage_15min <- function(site) {
   
 }
 
+#DAILY
 calc_Q_for_sensor_stage_daily <- function(site) {
   # subset manual data by site
   site_rc <- manual_H_Q_rc %>%
@@ -76,9 +78,9 @@ calc_Q_for_sensor_stage_daily <- function(site) {
              # if the stage is below the lowest stage where Q was measured, 
              # make it the lowest Q value measured; extrapolation with this 
              # few field Q's is unwise
-             ifelse(mean_corrected_stage_cm < min(site_rc$H), min(site_rc$Q),
+             ifelse(mean_corrected_stage_cm < min(site_rc$H_cm), min(site_rc$Q_cfs),
                     # similar Idea to above but with max stage measured        
-                    ifelse(mean_corrected_stage_cm >max(site_rc$H), max(site_rc$Q),
+                    ifelse(mean_corrected_stage_cm >max(site_rc$H_cm), max(site_rc$Q_cfs),
                            # if within the bounds of measured stage values, use a & b to calc Q 
                            (a*(mean_corrected_stage_cm)^b))))
   

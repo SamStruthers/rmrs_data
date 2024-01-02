@@ -6,9 +6,10 @@ apply_flag_15min <- function(site, FLAG, start_dt, end_dt, notes) {
   
   correct_and_flagged_df <- corrected_df %>%
     dplyr::filter(corrected_df$site_code %in% site) %>%
-    dplyr::filter(between(DT, start_dt, end_dt)) %>%
-    mutate(flag_type = FLAG, 
-           note = notes)
+    mutate(flag_type = case_when(between(DT, start_dt, end_dt) ~ FLAG, 
+                                   TRUE ~ "PASS"), 
+           note = case_when(between(DT, start_dt, end_dt) ~ notes, 
+                               TRUE ~ NA))
   
   return(correct_and_flagged_df)
   
@@ -18,12 +19,13 @@ apply_flag_15min <- function(site, FLAG, start_dt, end_dt, notes) {
 # change apply_flag to work on daily timestep rather than by DT
 apply_flag_daily <- function(site, FLAG, start_date, end_date, notes) {
   
-  correct_and_flagged_daily_df <- daily_means_stage %>%
-    dplyr::filter(date >= start_date & date < end_date) %>%
+  flagged_daily_df <- daily_means_stage %>%
     dplyr::filter(site_code == site) %>%
-    mutate(flag_type = FLAG, 
-           note = notes)
+    mutate(flag_type = case_when( (date >= start_date & date < end_date) ~ FLAG, 
+                                 TRUE ~ "PASS"), 
+           note = case_when((date >= start_date & date < end_date) ~ notes, 
+                            TRUE ~ NA))
   
-  return(correct_and_flagged_daily_df)
+  return(flagged_daily_df)
   
 }

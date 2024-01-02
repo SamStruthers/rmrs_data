@@ -23,7 +23,8 @@ import_cap_rod <- function(folder_path){
   }
   
   #Map over all filenames in folder to grab all the data
-  all_stage <- map_dfr(filenames, grab_data)
+  all_stage <- map_dfr(filenames, grab_data)%>%
+    select(site_code, DT, water_height_cm_inst, water_height_cm_ave)
   
   #return this dataset
   return(all_stage)
