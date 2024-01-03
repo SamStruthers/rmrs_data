@@ -166,12 +166,13 @@ create_meta_url <- function(site_num){
 
 #Create urls for Q or other sensor pulling
 create_data_url <- function(site_num){
-  end_dt <- "2023-12-00T13:30:00-07:00"
+  
   start_url <- "https://larimerco-ns5.trilynx-novastar.systems/novastar/data/api/v1/stationSummaries?forOperatorStationDashboard=true&stationNumId="
-  mid_url <- "&periodStart=2020-01-01T00:00:00-07:00&periodEnd="
+  
+  end_url <- "&periodStart=2020-01-01T08:48:56-07:00&periodEnd=2024-01-01T08:48:56-07:00"
   
   final_url <- tibble( site_number = site_num, 
-                      site_url = paste0(start_url, site_num, mid_url, end_dt))
+                      site_url = paste0(start_url, site_num, end_url))
   return(final_url)
 }
 
@@ -184,7 +185,7 @@ clp_Q_site_nums <- tibble(station_ids = c("11531", "11530", "11525",
                     "11514", "11004", "11515",
                     "11518", "11517", "11516",
                     "6770", "11083", "11082",
-                    "11009","7130","10408", "11021"))
+                    "11009", "11021"))
 
 #Meta URLs
 clp_meta_url <- map_dfr(clp_Q_site_nums, create_meta_url)%>%
@@ -251,10 +252,7 @@ This section will focus on downloading all the Q data available in the CLP and B
 
 ```{r Q grab function}
 
-#This function actually breaks down the list for a given site into the datetime and value components
-unlist_q_data <- function(i){
- unlist(discharge_data[[i]])
-}
+
 
 request <- NA
  
@@ -276,6 +274,10 @@ download_q <- function(site_url, site_number) {
     
   discharge_data <- total_list[["stationSummaries"]][[1]][["ts"]][[Q_sensor_num]][["data"]]
   
+  #This function actually breaks down the list for a given site into the datetime and value components
+unlist_q_data <- function(i){
+ unlist(discharge_data[[i]])
+}
   
   q_df <- map_dfr(seq(1, length(discharge_data), 1), unlist_q_data)%>%
     mutate(numid = site_number)
@@ -288,14 +290,9 @@ download_q <- function(site_url, site_number) {
   
 }
 
-test_site_url <- "https://larimerco-ns5.trilynx-novastar.systems/novastar/data/api/v1/stationSummaries?forOperatorStationDashboard=true&stationNumId=11531&periodStart=2022-01-25T13:59:00-07:00&periodEnd=2023-12-26T13:59:00-07:00"
-test_site_number <- "11531"
-#
- 
- test_q_df <- download_q(site_url = test_site_url,  site_number = test_site_number)
- 
-# df_11531 <- download_q(site_url = clp_data_url_test$site_url[1],site_number = clp_data_url_test$site_number[1])
-# df_11530 <- download_q(site_url = clp_data_url_test$site_url[2],site_number = clp_data_url_test$site_number[2])
+# Testing function
+# test_q_df <- download_q(site_url = clp_data_url$site_url[15],site_number = clp_data_url$site_number[15])
+
 
 ```
 
@@ -303,13 +300,12 @@ test_site_number <- "11531"
 
 ```{r}
 
-#maps to get all metadata/ location of all sensors within JSON
-clp_data_url_test <- head(clp_data_url, 2)
+# making into individual vectors
+site_url <- clp_data_url$site_url
+site_number <- clp_data_url$site_number
 
-clp_q_station_data <- map2(clp_data_url$site_url, clp_data_url$site_number, download_q)%>%
-  list_rbind()
-
-?map2_dfr()
+#map function over all sites
+clp_q_station_data<- map2_dfr(site_url, site_number, download_q)
 
 ```
 
@@ -319,20 +315,20 @@ clp_q_station_data <- map2(clp_data_url$site_url, clp_data_url$site_number, down
  to double check and make sure the data looks similar to the sites you pulled
  
 ```{r}
-
-test_df_q<- test_q_df%>%
-  mutate(nice_dt = substr(dt, 1, nchar(dt)-9),
-    datetime = as.POSIXct(dt, format = "%Y-%m-%dT%H:%M"), 
-         q_cfs = as.double(v) )
-
-plot_test_Q <- test_df_q%>%
-  ggplot(aes( x= datetime, y = q_cfs))+
-  geom_line()+
-  theme_bw()+
-  facet_wrap(~numid)
-plot(plot_test_Q)
-
-
+# 
+# test_df_q<- test_q_df%>%
+#   mutate(nice_dt = substr(dt, 1, nchar(dt)-9),
+#     datetime = as.POSIXct(dt, format = "%Y-%m-%dT%H:%M"), 
+#          q_cfs = as.double(v) )
+# 
+# plot_test_Q <- test_df_q%>%
+#   ggplot(aes( x= datetime, y = q_cfs))+
+#   geom_line()+
+#   theme_bw()+
+#   facet_wrap(~numid)
+# plot(plot_test_Q)
+# 
+# 
 
 final_df_q<- clp_q_station_data%>%
   mutate(nice_dt = substr(dt, 1, nchar(dt)-9),
@@ -348,3 +344,88 @@ plot(plot_test_Q)
 
 
 ```
+
+# Precip pull
+
+This section will focus on downloading precip data available in the CLP watershed available on the NovaStar site
+## Functions
+
+```{r precip grab function}
+
+
+
+request <- NA
+ 
+
+download_precip <- function(site_url, site_number) {
+  
+  #create request to novastar website using url created 
+  request <- GET(url = site_url)
+  
+  #gives content of httr pull
+  total_list <- content(request)
+  
+  #find list number where q is located
+  site_meta <- filter(final_meta, numid == site_number)
+  
+  precip_sensor_num <-  as.numeric(site_meta$Precip[1]) 
+  
+    # find list where discharge data is stored
+    
+  precip_data <- total_list[["stationSummaries"]][[1]][["ts"]][[precip_sensor_num]][["data"]]
+  
+  #This function actually breaks down the list for a given site into the datetime and value components
+unlist_precip_data <- function(i){
+ unlist(precip_data[[i]])
+}
+  
+  precip_df <- map_dfr(seq(1, length(precip_data), 1), unlist_precip_data)%>%
+    mutate(numid = site_number)
+  
+  
+  return(precip_df)
+  
+  Sys.sleep(2)
+   
+  
+}
+
+# Testing function
+test_precip_df <- download_precip(site_url = clp_data_url$site_url[2],site_number = clp_data_url$site_number[2])
+
+
+```
+
+## Pulling the Precip
+
+```{r}
+#Station numbers
+clp_Q_site_nums <- c("11531", "11530", "11525", 
+                    "11514", "11004", "11515",
+                    "11518", "11517", "11516",
+                    "6770", "11083", "11082",
+                    "11009", "11021")
+
+#Meta URLs
+clp_meta_url <- map_dfr(clp_Q_site_nums, create_meta_url)
+
+
+#Data URLs
+clp_data_url <- map_dfr(clp_Q_site_nums, create_data_url)
+
+#maps to get all metadata/ location of all sensors within JSON
+clp_station_meta <- map2_dfr(clp_meta_url$site_url, clp_meta_url$site_number, get_station_meta)
+
+#create a total meta_df that can be referenced in downloading functions later on
+final_meta <- clp_station_meta
+
+# making into individual vectors
+site_url <- clp_data_url$site_url
+site_number <- clp_data_url$site_number
+
+#map function over all sites
+clp_q_station_data<- map2_dfr(clp_data_url$site_url, clp_data_url$site_number, download_q)
+
+```
+
+
