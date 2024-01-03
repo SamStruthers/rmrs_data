@@ -146,13 +146,6 @@ same_day_data <- all_data_daily %>%
   filter(!is.na(mean_minidot_temp_c) & !is.na(mean_ISCO_temp_c)) %>%
   select(Site, date, mean_minidot_temp_c, mean_ISCO_temp_c)
 
-# Fit a linear model
-lm_model <- lm(mean_ISCO_temp_c ~ mean_minidot_temp_c, data = same_day_data)
-
-# Print summary of the linear model
-summary(lm_model)
-
-
 # Scatter plot with regression line
 ggplot(same_day_data, aes(x = mean_minidot_temp_c, y = mean_ISCO_temp_c)) +
   geom_point(aes(color = Site)) +
