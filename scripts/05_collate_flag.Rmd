@@ -26,11 +26,34 @@ source("scripts/00_setup.R")
 ### Read in data
 ```{r}
 source("scripts/02_ISCO_binder.R")
-# THIS WILL BREAK IF YOU HAVE A FILE OPEN in excel
-raw_isco_files <- list.files(path = "data/raw/ISCO/",full.names = TRUE)
 
-all_isco <- map_dfr(raw_isco_files, read_isco_file) 
-rm(raw_isco_files)
+# THIS WILL BREAK IF YOU HAVE A FILE OPEN in excel
+#Reading in collated 2023 data
+raw_isco_xlsx_files <- list.files(
+  path = "data/raw/ISCO/", # change to folder path of collated ISCO files
+  full.names = TRUE, pattern = ".xlsx")
+# read in all isco files
+isco_2023 <- map_dfr(raw_isco_xlsx_files, read_isco_file) 
+
+# change to folder path of .dat files
+raw_dat_files <- list.files(
+  path = "data/raw/ISCO/",   # change to folder path of raw ISCO .dat files
+  pattern = ".dat", full.names = TRUE, recursive = TRUE)
+
+#collate and organize all raw data from .dat files
+# This is relatively slow (~30 sec per file) so if you are parsing alot of files it may take a few minutes
+#isco_2022 <- clean_collate_dat_files(dat_files = raw_dat_files)
+# #save collated data
+#  write_csv(isco_2022, "data/collated/isco_data_2022.csv")
+# write_rds(isco_2022, "data/collated/isco_data_2022.RDS")
+# Once it has been run (assuming no new data), you can just load the RDS file for faster opening
+isco_2022 <- readRDS(file ="data/collated/isco_data_2022.RDS" )
+
+#combine both user collated and raw .dat files
+all_isco <- rbind(isco_2023, isco_2022)%>%
+  mutate(turb_rounded = round(turb, digits = 1))
+#remove file path vectors
+rm(raw_isco_xlsx_files, all_dat_files, dat_folder_path)
 ```
 ### Visualize
 
@@ -38,10 +61,9 @@ rm(raw_isco_files)
 isco_long <- all_isco%>%
   pivot_longer(cols = c(ISCO_temp_c,sc_us, cdom_ave, cdom, turb_ave, turb), names_to = "parameter", values_to = "value")
 
-plot <- ggplot(isco_long, aes(x= DT_round_mst, y= value, color= Site))+
+plot <- ggplot(all_isco, aes(x= DT_round_mst, y= ISCO_temp_c, color= site))+
   geom_line()+
-  #geom_smooth()+
-  facet_wrap(~parameter, scales = "free_y")
+  facet_wrap(~year(DT_round_mst), nrow = 2, scales = "free_x")
 
 ggplotly(plot)
 ```
