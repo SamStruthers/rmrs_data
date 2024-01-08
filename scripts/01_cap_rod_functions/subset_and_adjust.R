@@ -10,9 +10,9 @@ adjust_stage <- function(site_name, start_date, end_date,
     # difference between the manual measurement and the average of 
     # the first 4 sensor readings in the subset (i.e. the next 4
     # sensor readings after the manual measurement)
-    mutate(adjustment = manual_start - mean(head(water_height_cm_inst, n = 4), na.rm = TRUE) , 
+    mutate(adjustment = manual_start - mean(head(water_height_cm, n = 4), na.rm = TRUE) , 
            # adjust stage by adjustment difference
-           adjusted_stage = water_height_cm_inst + adjustment)
+           adjusted_stage = water_height_cm + adjustment)
   
   return(stage_df_new)
   

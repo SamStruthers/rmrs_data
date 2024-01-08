@@ -128,8 +128,6 @@ write_csv(stage_df, "data/collated/stage_UNCLEAN.csv")
 3.  *Create a new column, time factor, for each subset of data which allows the `driftR` package to correct for sensor drift.*
 4.  *Use `driftR` functions to match up the end of the data set with last field measurement.*
 
-
-
 ## *Functions to subset and adjust stage values*
 
 ```{r subset_adjust_functions}
@@ -195,7 +193,6 @@ plot(indv_corrected_graph)
 
 
 ```
-
 
 ## *Splitting sites where caprod was moved*
 
@@ -336,7 +333,6 @@ daily_means_stage <- corrected_df %>%
   ungroup()
 ```
 
-
 ```{r flag_daily_mean}
 # create df of sites and their codes for data flag, but on a daily timescale
 flag_daily_values<- flag_values %>%
@@ -406,6 +402,7 @@ write_csv(final_daily_means_stage,
 ```
 
 ## *Functions for Q calculations*
+
 Sourced from "scripts/cap_rod_functions/Q_calcs.R"
 
 1.  *create_rating_curve*
@@ -417,7 +414,6 @@ Sourced from "scripts/cap_rod_functions/Q_calcs.R"
 4.  *EXTRAPOLATION_Q_sensor_15min*
 
 5.  *EXTRAPOLATION_Q_sensor_daily*
-
 
 ## *Doing Q calculations*
 
@@ -442,6 +438,7 @@ Steps:
 ## Manual stage/Q import, cleaning and model creation
 
 ### Adjustments if site was moved mid season
+
 ```{r}
 #########################
 # if site was split, use this section
@@ -606,6 +603,7 @@ write_csv(EXTRAPOLATED_stage_Q_daily,
 ```
 
 # Clean up
+
 ```{r}
 # Assuming you want to keep variables a, b, and c
 variables_to_keep <- c("manual_H_Q_rc", "stage_Q_15min", "stage_Q_daily")
