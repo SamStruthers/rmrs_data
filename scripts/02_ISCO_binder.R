@@ -47,7 +47,7 @@ clean_collate_dat_files <- function(dat_files){
   clean_dat_files <- function(filename){
     # Grab the site name from the file path
     file_parts <- strsplit(filename, "/")[[1]]
-    site_code <- strsplit(file_parts[6], "_")[[1]][1]
+    site_code <- strsplit(file_parts[length(file_parts)], "_")[[1]][1]
     
     #read in the file
     content <- read.table(file = filename, sep = "/", skip = 1  )

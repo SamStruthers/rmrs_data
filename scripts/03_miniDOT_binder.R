@@ -6,7 +6,7 @@ dot_puller <- function(raw_folder_path){
   
   # Grab the site name from the file path
   file_parts <- strsplit(raw_folder_path, "/")[[1]]
-  site <-  strsplit(file_parts[4], "_")[[1]][1]
+  site_code <-  strsplit(file_parts[length(file_parts)], "_")[[1]][1]
   # Read the text files in
    txt_files <- lapply(txt_files_ls, function(x) {read.delim(file = x, header = F, sep =",", dec=".") %>% slice(-1:-2) %>%
                 janitor::row_to_names(row_number=1) %>%
@@ -17,7 +17,7 @@ dot_puller <- function(raw_folder_path){
               #Convert seconds column to DT utc
                 mutate(DT_utc=as_datetime(as.numeric(seconds), tz = "UTC"),
                        #Grab site from above
-                       Site = site,
+                       site = site_code,
                        #convert temp and do to numeric values rather than characters
                        minidot_temp_c=as.numeric(minidot_temp_c),
                        DO_mgL=as.numeric(DO_mgL))})
@@ -31,7 +31,7 @@ dot_puller <- function(raw_folder_path){
   #remove the seconds column
                   select(-c(seconds, DT_utc, DT_mst))
   #Save to CSV for future use
-   write_csv(combined_do, paste0("data/collated/", site,'_miniDOT_data.csv'))
+   write_csv(combined_do, paste0("data/collated/", site_code,'_miniDOT_data.csv'))
     #write_rds(x = combined_do, file =paste0("data/cleaned/", site,'_miniDOT_data.RDS' ))
     return(combined_do)
 }
