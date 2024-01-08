@@ -10,15 +10,261 @@ output: html_document
 source("scripts/00_setup.R")
 ```
 
-# Grab each type of data
+# Import Datasets
 - Cap rod
 - DO
 - ISCO
 
 ## Cap Rod
 
+### Load Functions
 ```{r}
-#render("scripts/01_cap_rod_cleaning.Rmd")
+# source all functions in the cap_rod_functions folder
+walk(list.files(path = "scripts/01_cap_rod_functions/", full.names = TRUE), source)
+
+```
+
+### Import datasets
+
+```{r}
+
+
+##### ----- Read in 2022 prepped Data ------ ######
+
+
+cap_rod_2022 <- read_csv("data/raw/cap_rod/2022/stage_combined_UNCLEAN.csv", show_col_types = FALSE)%>%
+  mutate(DT = with_tz(DT, tzone = "MST"), 
+         time = format(DT, "%H:%M"))
+
+
+### ----- Read in 2023 Data ------ ###### 
+
+cap_rod_2023 <- import_cap_rod(folder_path = "data/raw/cap_rod/")%>%
+  mutate(date = as_date(DT))
+# combine 2022 and 2023 into one df
+
+#stage_df <- bind_rows(cap_rod_2022, cap_rod_2023)
+
+
+
+```
+
+### Read in manual measurements
+
+```{r}
+##  2023 Field  Discharge measurements ##
+ Q_2023 <- calc_manual_q(folder_path = "data/raw/manual_Q/")%>%
+  select(site,date, q_cfs)
+#ToDo: left join with manual stage measurements by date and site
+
+
+##  2022 Field  Discharge and stage measurements ##
+Q_2022 <- read_csv("data/raw/manual_stage_2022.csv")%>%
+  mutate(DT = as.POSIXct(DT, format = "%m/%d/%y %H:%M"), 
+         date = as_date(DT))
+# Since there are no manual stage measurements for 2023, we can just use the 2022 measurements
+manual_measurements <- format_manual_stage(manual_df = Q_2022)
+
+```
+
+### Adjust stage data
+There are no stage measurements for 2023, so we will use the 2022 measurements to adjust the 2022 stage data. 2023 data will be joined later and will not be adjusted.
+
+```{r}
+
+#*Using some driftR functions and pmap, we can map over the manual measurements df and preform the adjustments.*
+
+# fit column names to match argument names in functions
+manual_measurements_for_func <- manual_measurements %>% 
+  dplyr::select(site_name = site_code, 
+                start_date = first_meas_DT,
+                end_date = last_meas_DT,
+                manual_start = first_meas_cm, 
+                manual_end = last_meas_cm) %>%
+  # NA values will break the functions, get rid of em!
+  na.omit() %>%
+  # pmap_dfr needs tibbles :)
+  as_tibble()
+
+##PMAP FOR ADJUSTMENT FUNCTIONS!##
+#
+stage_df <- cap_rod_2022
+
+# steps df for each subset between site visits to match the start measurement
+stepped_df <- pmap_dfr(manual_measurements_for_func, adjust_stage)
+
+# creates a time factor for each subset using the `driftR` factor function
+factor_df <- pmap_dfr(manual_measurements_for_func, dr_factor_subset)
+
+# using factor and last 4 measurements from manual end, corrects for drift so that the manual end and the end measurement match up
+corrected_df <- pmap_dfr(manual_measurements_for_func, dr_correctOne_subset)%>%
+  mutate(corrected_stage_cm = round(corrected_stage_cm, digits = 1) )
+
+# remove extra datasets from environment
+rm(manual_measurements_for_func, stepped_df, factor_df)
+
+
+```
+
+
+### Join in 2023 stage data
+
+```{r}
+# join in 2023 stage data 
+corrected_df <- corrected_df %>%
+  bind_rows(cap_rod_2023)
+
+```
+
+
+
+### Splitting sites where caprod was moved
+
+*LBEA and SHEP had to be moved mid-season in 2022 so they are now being split into LBEA 1/2 and SHEP 1/2*
+
+
+
+```{r site_split}
+
+# This dataframe contains the old names, new names and start/end dates for the name changes
+rename_df <- data.frame(old_name = c("LBEA", "SHEP"), 
+                       change_date = c("2022-08-19 10:15","2022-08-19 12:30"))%>% 
+  mutate(change_date = as.POSIXct(change_date, format = "%Y-%m-%d %H:%M", tz = "MST"))
+
+##################
+# If there are more moves in the future, this can be written in as a csv with the same  column names and read in using the hashed out code below:
+
+# rename_df <- read.csv("FILE_PATH_TO.CSV") %>% 
+#mutate(change_date = as.POSIXct(change_date, format = "%Y-%m-%d %H:%M", tz = "MST"))
+##################
+
+# function to change site_code to new names in rename_df if between start/end dates
+change_site_names <- function(old_name, change_date) {
+
+  corrected_df %>%
+    mutate(site_code = case_when(
+      site_code == old_name & DT < change_date ~ paste0(old_name, "1"),
+      site_code == old_name & DT >= change_date ~ paste0(old_name, "2"),
+      TRUE ~ site_code
+    ))
+  
+}
+# change site names
+final_stage_df <- pmap_dfr(rename_df, change_site_names)%>%
+  # remove extra columns and rename for final variables
+  select(DT, date,
+         site_code, 
+         sensor_stage_cm = water_height_cm, 
+         adjustment_cm = adjustment,
+         adjusted_stage_cm = adjusted_stage,
+         time_correction_value = corrFac, 
+         corrected_stage_cm,
+         time)
+# check that all the new names are in the df and old names are removed
+unique(final_stage_df$site_code)
+# if old names persist you may need to change the start/end dates so that all rows are included
+
+#remove extra vars from environment
+rm(rename_df, change_site_names)
+
+```
+
+
+### Create rating curves
+
+```{r}
+
+#Import csv with measurement DT, stage H and measured Q
+h_q_df <- manual_measurements %>%
+  filter(!is.na(q_cfs))%>%
+  mutate(Year = as.character(year(DT)), 
+          site_code = case_when(site_code == "LBEA"& DT < "2022-08-19 10:15" ~ "LBEA1", 
+                                site_code == "LBEA"& DT >= "2022-08-19 10:15" ~ "LBEA2", 
+         TRUE ~ site_code)
+         )%>%
+  select(H_cm,q_cfs,site_code, Year, DT)
+
+# list sites that we want to calculate rating curve for
+site_list <- unique(h_q_df$site_code)
+
+# using manual dataframe to create coefficients for each site
+rating_curve_coeffs <- map_dfr(site_list, create_rating_curve)
+```
+
+
+### Create 15 min Q timeseries
+Based on stage data and rating curves
+
+```{r}
+## *15min Q calculations*
+# calculate bounded Q for 15min data for all sites in site_list
+stage_Q_15min <- map_dfr(site_list, calc_Q_for_sensor_stage_15min)
+
+```
+### Create Daily Mean Q timeseries
+
+```{r}
+# take mean for each created stage value
+daily_means_stage <- final_stage_df %>%
+  dplyr::select(sensor_stage_cm, corrected_stage_cm, adjusted_stage_cm, date, site_code) %>%
+  group_by(date, site_code) %>%
+  dplyr:: summarise(mean_sensor_stage_cm = mean(sensor_stage_cm, na.rm = TRUE),
+                    mean_adjusted_stage_cm = mean(adjusted_stage_cm, na.rm = TRUE),
+                    mean_corrected_stage_cm = mean(corrected_stage_cm, na.rm = TRUE)) %>%
+  ungroup()
+
+
+## *Daily Q calculations*
+# calculate bounded Q for daily data for all sites in site_list
+stage_Q_daily <- map_dfr(site_list, calc_Q_for_sensor_stage_daily)
+
+```
+
+### Add flags to data
+
+```{r}
+## ------- 15 minute flagging ------- ##
+
+# flagging_csv <- "data/flag_values_caprods_2023.csv"
+# 
+# ## ------ Daily flagging ------ ##
+# 
+# # create df of sites and their codes for data flag, but on a daily timescale
+# flag_daily_values<- flag_values %>%
+#   mutate(start_date = as.Date(start_dt), 
+#          end_date = as.Date(end_dt)) %>%
+#   select(site, FLAG, start_date, end_date, notes)
+# 
+# ##### Daily flag function in `apply_daily_flag.R`
+# 
+# # this may induce duplicates!
+# correct_and_flagged_daily_df <- pmap_dfr(flag_daily_values, apply_flag_daily)
+
+```
+
+### Export collated and adjusted data
+
+```{r}
+folder <- "data/FINAL/"
+
+write_csv(stage_Q_15min, 
+          paste0(folder, "stage_Q_15min_CPF.csv"))
+
+write_csv(stage_Q_daily, 
+          paste0(folder, "stage_Q_daily_CPF.csv"))
+
+```
+
+### Clean up
+
+```{r}
+#Remove extra datasets from environment
+rm(cap_rod_2022, cap_rod_2023, h_q_df, daily_means_stage, stage_df, corrected_df)
+```
+## Visualize
+
+```{r}
+
 ```
 
 
@@ -53,7 +299,7 @@ isco_2022 <- readRDS(file ="data/collated/isco_data_2022.RDS" )
 all_isco <- rbind(isco_2023, isco_2022)%>%
   mutate(turb_rounded = round(turb, digits = 1))
 #remove file path vectors
-rm(raw_isco_xlsx_files, all_dat_files, dat_folder_path)
+rm(raw_isco_xlsx_files, raw_dat_files)
 ```
 ### Visualize
 
@@ -69,9 +315,8 @@ ggplotly(plot)
 ```
 
 
-
-
 ## DO
+### Read in data
 ```{r}
 #source script with DO binder function
 source("scripts/03_miniDOT_binder.R")
@@ -81,10 +326,10 @@ raw_do_dir <- list.files(path = "data/raw/DO", full.names = TRUE)
 # Run all filepaths thru dot puller
 all_do <- map_dfr(.x = raw_do_dir, .f = dot_puller)
 ```
-## Check DO
+### Visualize DO
 
 ```{r}
-DO_plot <- ggplot(all_do, aes(x= DT_round_mst, y= DO_mgL, color= Site))+
+DO_plot <- ggplot(all_do, aes(x= DT_round_mst, y= DO_mgL, color= site))+
   geom_line()+
   geom_smooth()
 
@@ -97,22 +342,24 @@ ggplotly(DO_plot)
 
 # List all sites to be processed below
 sites <- c("SAWM","FISH", "LBEA", "BLAK" )
+start_dt <- "2022-01-01 00:00:00"
+end_dt <- "2023-12-31 23:55:00"
 
 create_all_data <- function(site_name){
-start_date <- as.POSIXct("2023-01-01 00:00:00", tz = "MST")
-end_date <- as.POSIXct("2023-12-31 23:55:00", tz = "MST")
+start_date <- as.POSIXct(start_dt, tz = "MST")
+end_date <- as.POSIXct(end_dt, tz = "MST")
 
 site_data <- tibble(
-  Site = site_name,
+  site = site_name,
   DT_round_mst = seq(start_date, end_date, by = "5 min"))
 
 return(site_data)
 }
 
 all_data <- map_dfr(sites, create_all_data)%>%
-  left_join(all_isco, by = c("Site", "DT_round_mst"))%>%
-  left_join(all_do, by = c("Site", "DT_round_mst"))%>%
-  filter(rowSums(!is.na(select(., -Site, -DT_round_mst))) > 0)%>%
+  left_join(all_isco, by = c("site", "DT_round_mst"))%>%
+  left_join(all_do, by = c("site", "DT_round_mst"))%>%
+  filter(rowSums(!is.na(select(., -site, -DT_round_mst))) > 0)%>%
   mutate(date = as.Date(DT_round_mst))
   
 
@@ -180,6 +427,15 @@ ggplot(same_day_data, aes(x = mean_minidot_temp_c, y = mean_ISCO_temp_c)) +
 
 ```
 
+# Viewing Flags
+```{r}
+# colors to visualize site flags in plots
+flag_colors <- c("PASS" = "green", 
+                 "FAIL" = "red", 
+                 "TREND" = "purple",
+                 "VARIATION"= "blue",
+                 "CHANNEL"= "orange") 
+```
 
 
 
