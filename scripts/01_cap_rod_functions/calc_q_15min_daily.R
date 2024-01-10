@@ -81,6 +81,10 @@ calc_Q_for_sensor_stage_daily <- function(site) {
              year == "2023" ~ (a*(mean_sensor_stage_cm)^b),
              # Default case when none of the above conditions are met
              TRUE ~ NA_real_), 
+           # some rating curves are not robust and thus will extrapolate beyond measured Q for stages lower than the max Q
+           # this corrects for that by setting the Q to the max Q if the calculated Q is greater than the max Q
+           Q_cfs = case_when(Q_cfs > max(site_rc$q_cfs) ~ max(site_rc$q_cfs), 
+                             TRUE ~ Q_cfs),
            # calculate Q for the site based on a, b, c and stage given
            extrapolated_Q_cfs = case_when(year == "2022" ~ (a*(mean_corrected_stage_cm)^b),
                                           year == "2023" ~ (a*(mean_sensor_stage_cm)^b)))
