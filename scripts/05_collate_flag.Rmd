@@ -151,6 +151,8 @@ change_site_names <- function(old_name, change_date) {
 }
 # change site names
 final_stage_df <- pmap_dfr(rename_df, change_site_names)%>%
+  filter(site_code %nin% rename_df$old_name)%>%
+  distinct()%>%
   # remove extra columns and rename for final variables
   select(DT, date,
          site_code, 
@@ -253,6 +255,12 @@ write_csv(stage_Q_15min,
 write_csv(stage_Q_daily, 
           paste0(folder, "stage_Q_daily_CPF.csv"))
 
+all_stage_Q_15min <- stage_Q_15min %>%
+  rename(site = site_code, DT_round_mst = DT)%>%
+  mutate(site = case_when(site == "LBEA1" ~ "LBEA",
+                          site == "LBEA2" ~ "LBEA",
+                          TRUE ~ site))%>%
+  select(site, DT_round_mst, Q_cfs,sensor_stage_cm, adjustment_cm, corrected_stage_cm, extrapolated_Q_cfs)
 ```
 
 ### Clean up
@@ -264,6 +272,21 @@ rm(cap_rod_2022, cap_rod_2023, h_q_df, daily_means_stage, stage_df, corrected_df
 ## Visualize
 
 ```{r}
+# graph Q for sawm using stage_q_daily facet wrap for 2022 and 2023
+ggplot(filter(stage_Q_daily, site_code == "LBEA2"), aes(date, Q_cfs, color = site_code))+
+  geom_point()+
+    geom_point(data = filter(Q_2022, site_code == "FISH"), aes(x= date, y = q_cfs), color = "blue")+
+  geom_point(data = filter(Q_2023, site == "FISH"), aes(x= date, y = q_cfs), color = "blue")+
+  #facet_wrap(~year(date), scales = "free_x")+
+  theme_bw()+
+  theme(legend.position = "bottom")+
+  labs(x = "Date", y = "Discharge (cfs)", color = "Site Code")
+
+ggplot(filter(stage_Q_15min, site_code == "LBEA2"), aes(DT))+
+  geom_point(aes(y = sensor_stage_cm))+
+   geom_point(aes(y = corrected_stage_cm), color = "red")+
+   geom_point(data = filter(manual_measurements, site_code == "LBEA" ), aes(y = H_cm), color = "blue")
+
 
 ```
 
@@ -297,9 +320,11 @@ isco_2022 <- readRDS(file ="data/collated/isco_data_2022.RDS" )
 
 #combine both user collated and raw .dat files
 all_isco <- rbind(isco_2023, isco_2022)%>%
-  mutate(turb_rounded = round(turb, digits = 1))
+  mutate(turb_rounded = round(turb, digits = 1))%>%
+  select(-record)
 #remove file path vectors
-rm(raw_isco_xlsx_files, raw_dat_files)
+rm(raw_isco_xlsx_files, raw_dat_files, isco_2022, isco_2023)
+
 ```
 ### Visualize
 
@@ -335,6 +360,14 @@ DO_plot <- ggplot(all_do, aes(x= DT_round_mst, y= DO_mgL, color= site))+
 
 ggplotly(DO_plot)
 ```
+## Precip
+
+Pulled from Larimer County website in `scripts/q_precip_grab.rmd`
+
+```{r}
+
+precip <- readRDS("data/larimer_co_precip_2021_2023.rds")
+```
 
 # Collate all data
 
@@ -359,75 +392,148 @@ return(site_data)
 all_data <- map_dfr(sites, create_all_data)%>%
   left_join(all_isco, by = c("site", "DT_round_mst"))%>%
   left_join(all_do, by = c("site", "DT_round_mst"))%>%
-  filter(rowSums(!is.na(select(., -site, -DT_round_mst))) > 0)%>%
+  left_join(all_stage_Q_15min, by = c("site", "DT_round_mst"))%>%
+  left_join(precip, by = "DT_round_mst")%>%
+  mutate(precip_in = case_when(site %in% c("FISH", "LBEA", "BLAK") ~ `Larimer - Salt Cabin`, 
+                               #site %in% c("LBEA","FISH") ~ `Larimer - Old Flowers Road`,
+                               site == "SAWM"  ~ `Larimer - Joe Wright Reservoir`, 
+         TRUE ~ NA), 
+         precip_site = case_when(site %in% c("FISH", "LBEA", "BLAK") ~ "Larimer - Salt Cabin", 
+                               #site %in% c("LBEA","FISH") ~ `Larimer - Old Flowers Road`,
+                               site == "SAWM"  ~ "Larimer - Joe Wright Reservoir", 
+         TRUE ~ NA)
+         )%>%
+  select(-`Larimer - Salt Cabin`, -`Larimer - Old Flowers Road`, -`Larimer - Joe Wright Reservoir`,
+         -`Larimer - Roaring Creek at Hwy 14`, -`Larimer - Tunnel Creek at Hwy 14`)%>%
+  filter(rowSums(!is.na(select(., -site, -DT_round_mst, -precip_site))) > 0)%>%
   mutate(date = as.Date(DT_round_mst))
   
-
+rm(all_isco, all_do, all_stage_Q_15min, DO_plot)
 ```
-
-### Plot
-
-```{r}
-
-
-
-temp_test <- ggplot(data = temp_test, aes(x= DT_round_mst))+
-  geom_line( aes( y= temp_diff), color = "blue")
-
-ggplotly(temp_test)
-```
-
-
-# Daily Conversion
+## Daily Conversion
  Convert the entire dataframe to daily values
 ```{r}
 
 all_data_daily <- all_data%>%
-  group_by(date, Site)%>%
+  group_by(date, site)%>%
   summarise(
     mean_do_mgL = mean(DO_mgL, na.rm = TRUE), 
     mean_minidot_temp_c = mean(minidot_temp_c, na.rm = TRUE), 
     mean_ISCO_temp_c = mean(ISCO_temp_c, na.rm = TRUE),
-    mean_sc_us  = mean(sc_us, na.rm = TRUE)
-  )
+    mean_sc_us  = mean(sc_us, na.rm = TRUE), 
+    mean_cdom_ave = mean(cdom_ave, na.rm = TRUE),
+    mean_cdom = mean(cdom, na.rm = TRUE),
+    mean_turb_ave = mean(turb_ave, na.rm = TRUE),
+    mean_turb = mean(turb, na.rm = TRUE),
+    mean_sensor_stage_cm = mean(sensor_stage_cm, na.rm = TRUE),
+    mean_corrected_stage_cm = mean(corrected_stage_cm, na.rm = TRUE),
+    mean_Q_cfs = mean(Q_cfs, na.rm = TRUE),
+    mean_extrapolated_Q_cfs = mean(extrapolated_Q_cfs, na.rm = TRUE), 
+    mean_precip_in = sum(precip_in, na.rm = TRUE)
+  )%>%
+  ungroup()%>%
+  mutate(doy = yday(date), 
+         year = as.character(year(date)))
 
+```
+### Long format
+```{r}
+all_data_long <- all_data%>%
+  pivot_longer(cols = c(sc_us:precip_in), names_to = "parameter", values_to = "value")%>%
+  filter(!is.nan(value) & !is.na(value))
 
+all_data_daily_long <- all_data_daily%>%
+  pivot_longer(cols = c(mean_do_mgL:mean_precip_in), names_to = "parameter", values_to = "value")%>%
+  filter(!is.nan(value) & !is.na(value))
 
 ```
 
-# Viewing results
+
+## Plotting results
 ```{r}
-plot <- ggplot(all_data_daily, aes(x = date)) +
-  geom_point(aes(y = mean_minidot_temp_c, color = "Minidot Temp"), size = 1) +
-  geom_point(aes(y = mean_ISCO_temp_c, color = "ISCO Temp"), size = 1) +
+# View fish temp data between sensors
+ggplot(filter(all_data_daily, site == "FISH"), aes(x = doy)) +
+   geom_point(aes(y = mean_minidot_temp_c, color = "Minidot Temp", shape = year), size = 3) +
+   geom_point(aes(y = mean_ISCO_temp_c, color = "ISCO Temp", shape = year), size = 3) +
+  geom_smooth(aes(y = mean_minidot_temp_c, color = "Minidot Temp"), se = FALSE)+
+  geom_smooth(aes(y = mean_ISCO_temp_c, color = year), se = FALSE)+
   labs(x = "Date",
        y = "Mean temp") +
-  scale_color_manual(values = c("Minidot Temp" = "red", "ISCO Temp" = "blue")) +
-  theme_minimal()+
-  facet_wrap(~Site)
-ggplotly(plot)
+  scale_color_manual(values = c("Minidot Temp" = "red", "ISCO Temp" = "blue", "2022" = "green", "2023" = "purple")) +
+  theme_minimal()
++
+  facet_wrap(~site)
+
+# view all data all sensors at 5 min intervals
+ggplot(data = filter(all_data_long, parameter %in% c("precip_in", "turb_ave",  "sc_us")& site == "SAWM"), aes(x= DT_round_mst, y = value, color = site))+
+  geom_point()+
+  facet_wrap(~parameter, scales = "free_y")
+
+# view daily data
+ggplot(data = all_data_daily_long, aes(x= date, y = value, color = site))+
+  geom_point()+
+  facet_wrap(~parameter,scales = "free_y")
+
+
 ```
+
+## Exporting
 
 ```{r}
+dir = "data/final"
+write_csv(all_data, file.path(dir, "all_data.csv"))
+write_rds(all_data, file.path(dir, "all_data.rds"))
+write_csv(all_data_daily, file.path(dir, "all_data_daily.csv"))
+write_rds(all_data_daily, file.path(dir, "all_data_daily.rds"))
+write_csv(all_data_long, file.path(dir, "all_data_long.csv"))
+write_rds(all_data_long, file.path(dir, "all_data_long.rds"))
+write_csv(all_data_daily_long, file.path(dir, "all_data_daily_long.csv"))
+write_rds(all_data_daily_long, file.path(dir, "all_data_daily_long.rds"))
 
-# Filter data for the same site and on the same day
-same_day_data <- all_data_daily %>%
-  filter(!is.na(mean_minidot_temp_c) & !is.na(mean_ISCO_temp_c)) %>%
-  select(Site, date, mean_minidot_temp_c, mean_ISCO_temp_c)
-
-# Scatter plot with regression line
-ggplot(same_day_data, aes(x = mean_minidot_temp_c, y = mean_ISCO_temp_c)) +
-  geom_point(aes(color = Site)) +
-  #geom_smooth(method = "lm", se = FALSE, color = "blue") +  # Add a linear regression line
-  geom_abline(intercept = 0, slope = 1, linetype = "dashed", color = "red") +  # Add a 1:1 line
-  labs(title = "Linear Model: Minidot vs. Isco Temperature",
-       x = "Minidot Temperature (°C)",
-       y = "Isco Temperature (°C)") +
-  theme_minimal()
 
 ```
 
-# Viewing Flags
+
+# Flagging
+
+
+Flags were determined visually and compared to field notes about the streams.
+
+Flag names:
+
+PASS: Data looks good
+
+FAIL: Data is questionable, caution using it
+
+CHANNEL: Channel changes occurred, stage may not be accurate
+
+TREND: Magnitude of data is correct but data trends un-intuitively
+
+VARIATION: Daily variation is questionable, use larger time step for safety
+
+Any additional: Explained in notes
+
+## Adding flags to data
+```{r}
+
+# 4 columns:
+# start_dt <- when flag starts
+# end_dt <- when flag ends
+      ## make sure start != end, will duplicate data
+# FLAG: flag code
+# notes: any notes about the flag code or field notes
+flag_values<- read_csv("data/flag_values_caprods_2023.csv", show_col_types = FALSE)%>%
+  mutate(start_dt = as.POSIXct(start_dt, format = "%m/%d/%y %H:%M", tz = "MST"),
+         end_dt = as.POSIXct(end_dt, format = "%m/%d/%y %H:%M", tz = "MST"))%>%
+  select(site = site_code, start_dt, end_dt, FLAG, notes = Notes)
+
+#DEV needed
+correct_and_flagged_df <- apply_flag_15min()
+
+
+```
+
+## Viewing Flags
 ```{r}
 # colors to visualize site flags in plots
 flag_colors <- c("PASS" = "green", 
