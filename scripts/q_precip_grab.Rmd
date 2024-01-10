@@ -187,6 +187,7 @@ clp_Q_site_nums <- tibble(station_ids = c("11531", "11530", "11525",
                     "6770", "11083", "11082",
                     "11009", "11021"))
 
+
 #Meta URLs
 clp_meta_url <- map_dfr(clp_Q_site_nums, create_meta_url)%>%
   as.data.frame()
@@ -195,6 +196,9 @@ clp_meta_url <- map_dfr(clp_Q_site_nums, create_meta_url)%>%
 #Data URLs
 clp_data_url <- map_dfr(clp_Q_site_nums, create_data_url)%>%
   as.data.frame()
+
+
+
 
 ```
 
@@ -369,29 +373,34 @@ download_precip <- function(site_url, site_number) {
   site_meta <- filter(final_meta, numid == site_number)
   
   precip_sensor_num <-  as.numeric(site_meta$Precip[1]) 
+  precip_accum_num <- as.numeric(site_meta$`PrecipAccum-Storm`[1])
   
     # find list where discharge data is stored
     
   precip_data <- total_list[["stationSummaries"]][[1]][["ts"]][[precip_sensor_num]][["data"]]
+  precip_accum_data <- total_list[["stationSummaries"]][[1]][["ts"]][[precip_accum_num]][["data"]]
   
   #This function actually breaks down the list for a given site into the datetime and value components
 unlist_precip_data <- function(i){
  unlist(precip_data[[i]])
 }
+unlist_precip_accum_data <- function(i){
+ unlist(precip_accum_data[[i]])
+}
   
   precip_df <- map_dfr(seq(1, length(precip_data), 1), unlist_precip_data)%>%
     mutate(numid = site_number)
+  precip_accum_df <- map_dfr(seq(1, length(precip_data), 1), unlist_precip_accum_data)%>%
+    select(dt, precip_accum = v)
+  %>%
+    left_join(precip_df, by = "dt" )
   
-  
-  return(precip_df)
+  return(precip_accum_df)
   
   Sys.sleep(2)
    
   
 }
-
-# Testing function
-test_precip_df <- download_precip(site_url = clp_data_url$site_url[2],site_number = clp_data_url$site_number[2])
 
 
 ```
@@ -400,18 +409,18 @@ test_precip_df <- download_precip(site_url = clp_data_url$site_url[2],site_numbe
 
 ```{r}
 #Station numbers
-clp_Q_site_nums <- c("11531", "11530", "11525", 
-                    "11514", "11004", "11515",
-                    "11518", "11517", "11516",
-                    "6770", "11083", "11082",
-                    "11009", "11021")
 
+clp_precip_site_nums <- tibble(station_ids = c("11528", "11530", "11527", 
+                                               "11521", "11520"))
 #Meta URLs
-clp_meta_url <- map_dfr(clp_Q_site_nums, create_meta_url)
+clp_meta_url <- map_dfr(clp_precip_site_nums, create_meta_url)%>%
+  as.data.frame()
 
 
 #Data URLs
-clp_data_url <- map_dfr(clp_Q_site_nums, create_data_url)
+clp_data_url <- map_dfr(clp_precip_site_nums, create_data_url)%>%
+  as.data.frame()
+
 
 #maps to get all metadata/ location of all sensors within JSON
 clp_station_meta <- map2_dfr(clp_meta_url$site_url, clp_meta_url$site_number, get_station_meta)
@@ -419,13 +428,56 @@ clp_station_meta <- map2_dfr(clp_meta_url$site_url, clp_meta_url$site_number, ge
 #create a total meta_df that can be referenced in downloading functions later on
 final_meta <- clp_station_meta
 
-# making into individual vectors
-site_url <- clp_data_url$site_url
-site_number <- clp_data_url$site_number
+# Testing function on just one site
+#test_precip_df <- download_precip(site_url = clp_data_url$site_url[1],site_number = clp_data_url$site_number[1])
 
 #map function over all sites
-clp_q_station_data<- map2_dfr(clp_data_url$site_url, clp_data_url$site_number, download_q)
+clp_precip <- map2_dfr(clp_data_url$site_url, clp_data_url$site_number, download_precip)%>%
+  #clean up the date time and value columns
+  mutate(nice_dt = substr(dt, 1, nchar(dt)-9),
+    datetime = as.POSIXct(dt, format = "%Y-%m-%dT%H:%M"), 
+    DT_round_mst = with_tz(datetime, tzone = "MST"), 
+    # rename and convert precip value to double
+         precip = as.double(v), 
+    # onvert precip accum to double
+    precip_accum = as.double(precip_accum), 
+    #convert numid to integer
+    numid = as.integer(numid))%>%
+  #join with meta data
+  left_join(final_meta, by = "numid")%>%
+  select(DT_round_mst, name,numid, precip, precip_accum,  elevation, lat, long)
 
+rm(clp_precip_site_nums, clp_data_url, clp_meta_url, clp_station_meta)
+```
+
+## Export
+
+```{r}
+
+precip_export <- clp_precip%>%
+  mutate(DT_round_mst = floor_date(DT_round_mst, "5 minutes"))%>%
+  group_by(DT_round_mst, numid, name)%>%
+  summarise(precip = sum(precip, na.rm = TRUE), precip_accum = sum(precip_accum, na.rm = TRUE))%>%
+  ungroup()%>%
+  pivot_wider(names_from = name, values_from = precip, id_cols = DT_round_mst)
+
+write_rds(precip_export, "data/larimer_co_precip_2021_2023.rds")
 ```
 
 
+## Check the Precip
+ I'd recommend going to https://larimerco-ns5.trilynx-novastar.systems/novastar/operator/#/stationDashboard/100
+ to double check and make sure the data looks similar to the sites you pulled
+ 
+```{r}
+
+
+ clp_precip%>%
+  ggplot(aes( x= datetime, y = precip_accum))+
+  geom_line()+
+  theme_bw()+
+  facet_wrap(~numid)
+
+
+
+```
