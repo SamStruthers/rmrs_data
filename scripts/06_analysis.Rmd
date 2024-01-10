@@ -1,0 +1,40 @@
+---
+title: "Sensor Data Analysis"
+author: "Sam Struthers- CSU ROSSyndicate"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+source("scripts/00_setup.R")
+
+all_data <- readRDS("data/final/all_data.rds")
+
+all_data_daily <- readRDS("data/final/all_data_daily.rds")
+
+```
+
+
+# Analysis
+
+## Temperature
+```{r}
+
+# Filter data for the same site and on the same day
+same_day_data <- all_data_daily %>%
+  filter(!is.na(mean_minidot_temp_c) & !is.na(mean_ISCO_temp_c)) %>%
+  select(Site, date, mean_minidot_temp_c, mean_ISCO_temp_c)
+
+# Scatter plot with regression line
+ggplot(same_day_data, aes(x = mean_minidot_temp_c, y = mean_ISCO_temp_c)) +
+  geom_point(aes(color = Site)) +
+  #geom_smooth(method = "lm", se = FALSE, color = "blue") +  # Add a linear regression line
+  geom_abline(intercept = 0, slope = 1, linetype = "dashed", color = "red") +  # Add a 1:1 line
+  labs(title = "Linear Model: Minidot vs. Isco Temperature",
+       x = "Minidot Temperature (°C)",
+       y = "Isco Temperature (°C)") +
+  theme_minimal()
+
+```
+
+
