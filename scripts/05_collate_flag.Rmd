@@ -59,11 +59,10 @@ cap_rod_2023 <- import_cap_rod(folder_path = "data/raw/cap_rod/")%>%
 
 
 ##  2022 Field  Discharge and stage measurements ##
-Q_2022 <- read_csv("data/raw/manual_stage_2022.csv")%>%
+manual_measurements <- read_csv("data/raw/manual_stage.csv", show_col_types = FALSE)%>%
   mutate(DT = as.POSIXct(DT, format = "%m/%d/%y %H:%M"), 
          date = as_date(DT))
-# Since there are no manual stage measurements for 2023, we can just use the 2022 measurements
-manual_measurements <- format_manual_stage(manual_df = Q_2022)
+
 
 ```
 
@@ -75,8 +74,12 @@ There are no stage measurements for 2023, so we will use the 2022 measurements t
 #*Using some driftR functions and pmap, we can map over the manual measurements df and preform the adjustments.*
 
 # fit column names to match argument names in functions
+# Since there are no manual stage measurements for 2023, we can just use the 2022 measurements
+
 manual_measurements_for_func <- manual_measurements %>% 
-  dplyr::select(site_name = site_code, 
+  filter(year(DT) == 2022) %>%
+  format_manual_stage()%>%
+select(site_name = site_code, 
                 start_date = first_meas_DT,
                 end_date = last_meas_DT,
                 manual_start = first_meas_cm, 
@@ -106,13 +109,61 @@ rm(manual_measurements_for_func, stepped_df, factor_df)
 
 ```
 
+### Adjusting 2023 SAWM data
+
+```{r}
+
+#*Using some driftR functions and pmap, we can map over the manual measurements df and preform the adjustments.*
+
+# fit column names to match argument names in functions
+manual_measurements_for_func <- manual_measurements %>% 
+  filter(year(DT) == 2023) %>%
+  format_manual_stage()%>%
+select(site_name = site_code, 
+                start_date = first_meas_DT,
+                end_date = last_meas_DT,
+                manual_start = first_meas_cm, 
+                manual_end = last_meas_cm) %>%
+  # NA values will break the functions, get rid of em!
+  na.omit() %>%
+  # pmap_dfr needs tibbles :)
+  as_tibble()
+
+##PMAP FOR ADJUSTMENT FUNCTIONS!##
+#
+stage_df <- cap_rod_2023%>%
+  filter(site_code == "SAWM")
+
+# steps df for each subset between site visits to match the start measurement
+stepped_df <- pmap_dfr(manual_measurements_for_func, adjust_stage)
+
+# creates a time factor for each subset using the `driftR` factor function
+factor_df <- pmap_dfr(manual_measurements_for_func, dr_factor_subset)
+
+# using factor and last 4 measurements from manual end, corrects for drift so that the manual end and the end measurement match up
+corrected_df_2023 <- pmap_dfr(manual_measurements_for_func, dr_correctOne_subset)%>%
+  mutate(corrected_stage_cm = round(corrected_stage_cm, digits = 1) )
+
+cap_rod_non_adjusted <- cap_rod_2023%>%
+  filter(site_code != "SAWM" | DT >= max(manual_measurements_for_func$end_date))
+
+# remove extra datasets from environment
+rm(manual_measurements_for_func, stepped_df, factor_df)
+
+
+```
+
+
 
 ### Join in 2023 stage data
 
 ```{r}
+
+
 # join in 2023 stage data 
 corrected_df <- corrected_df %>%
-  bind_rows(cap_rod_2023)
+  bind_rows(corrected_df_2023) %>%
+  bind_rows(cap_rod_non_adjusted)
 
 ```
 
@@ -218,7 +269,8 @@ daily_means_stage <- final_stage_df %>%
 
 ## *Daily Q calculations*
 # calculate bounded Q for daily data for all sites in site_list
-stage_Q_daily <- map_dfr(site_list, calc_Q_for_sensor_stage_daily)
+stage_Q_daily <- map_dfr(site_list, calc_Q_for_sensor_stage_daily)%>%
+  rename(site = site_code)
 
 ```
 
@@ -260,7 +312,7 @@ all_stage_Q_15min <- stage_Q_15min %>%
   mutate(site = case_when(site == "LBEA1" ~ "LBEA",
                           site == "LBEA2" ~ "LBEA",
                           TRUE ~ site))%>%
-  select(site, DT_round_mst, Q_cfs,sensor_stage_cm, adjustment_cm, corrected_stage_cm, extrapolated_Q_cfs)
+  select(site, DT_round_mst, Q_cfs,sensor_stage_cm, adjustment_cm, corrected_stage_cm, extrapolated_Q_cfs, q_flag)
 ```
 
 ### Clean up
@@ -273,20 +325,28 @@ rm(cap_rod_2022, cap_rod_2023, h_q_df, daily_means_stage, stage_df, corrected_df
 
 ```{r}
 # graph Q for sawm using stage_q_daily facet wrap for 2022 and 2023
-ggplot(filter(stage_Q_daily, site_code == "LBEA2"), aes(date, Q_cfs, color = site_code))+
-  geom_point()+
-    geom_point(data = filter(Q_2022, site_code == "FISH"), aes(x= date, y = q_cfs), color = "blue")+
-  geom_point(data = filter(Q_2023, site == "FISH"), aes(x= date, y = q_cfs), color = "blue")+
-  #facet_wrap(~year(date), scales = "free_x")+
-  theme_bw()+
-  theme(legend.position = "bottom")+
-  labs(x = "Date", y = "Discharge (cfs)", color = "Site Code")
+# ggplot(filter(stage_Q_daily, site_code == "SAWM"), aes(date, Q_cfs))+
+#   geom_point(aes(color = q_flag))+
+#    # geom_point(data = filter(manual_measurements, site_code == "SAWM"), aes(x= date, y = q_cfs))+
+#   #geom_point(data = filter(Q_2023, site == "FISH"), aes(x= date, y = q_cfs), color = "blue")+
+#   facet_wrap(~year(date), scales = "free_x", ncol = 1, nrow = 2)+
+#   theme_bw()+
+#   theme(legend.position = "right")+
+#   labs(x = "Date", y = "Discharge (cfs)", color = "Q Calc Flag")
 
-ggplot(filter(stage_Q_15min, site_code == "LBEA2"), aes(DT))+
-  geom_point(aes(y = sensor_stage_cm))+
-   geom_point(aes(y = corrected_stage_cm), color = "red")+
-   geom_point(data = filter(manual_measurements, site_code == "LBEA" ), aes(y = H_cm), color = "blue")
+#ggsave("data/figs/SAWM_daily_Q_2022_2023.png", width = 10, height = 5, dpi = 300)
 
+# ggplot(filter(stage_Q_15min, site_code == "SAWM" & year(DT) == 2022 ), aes(DT))+
+#   geom_point(aes(y = sensor_stage_cm))+
+#    geom_point(aes(y = corrected_stage_cm), color = "red")+
+#    geom_point(data = filter(manual_measurements, site_code == "SAWM"& year(DT) == 2022  ), aes(y = H_cm), color = "blue")
+
+# testing <- filter(stage_Q_daily, site_code == "SAWM")%>%
+#   mutate(year = as.character(year(date)), 
+#          doy = yday(date))
+# 
+# ggplot(testing, aes(doy, Q_cfs))+
+#   geom_point(aes(color = year))
 
 ```
 
@@ -332,11 +392,11 @@ rm(raw_isco_xlsx_files, raw_dat_files, isco_2022, isco_2023)
 isco_long <- all_isco%>%
   pivot_longer(cols = c(ISCO_temp_c,sc_us, cdom_ave, cdom, turb_ave, turb), names_to = "parameter", values_to = "value")
 
-plot <- ggplot(all_isco, aes(x= DT_round_mst, y= ISCO_temp_c, color= site))+
-  geom_line()+
-  facet_wrap(~year(DT_round_mst), nrow = 2, scales = "free_x")
-
-ggplotly(plot)
+# plot <- ggplot(all_isco, aes(x= DT_round_mst, y= ISCO_temp_c, color= site))+
+#   geom_line()+
+#   facet_wrap(~year(DT_round_mst), nrow = 2, scales = "free_x")
+# 
+# ggplotly(plot)
 ```
 
 
@@ -354,11 +414,11 @@ all_do <- map_dfr(.x = raw_do_dir, .f = dot_puller)
 ### Visualize DO
 
 ```{r}
-DO_plot <- ggplot(all_do, aes(x= DT_round_mst, y= DO_mgL, color= site))+
-  geom_line()+
-  geom_smooth()
-
-ggplotly(DO_plot)
+# DO_plot <- ggplot(all_do, aes(x= DT_round_mst, y= DO_mgL, color= site))+
+#   geom_line()+
+#   geom_smooth()
+# 
+# ggplotly(DO_plot)
 ```
 ## Precip
 
@@ -398,6 +458,7 @@ all_data <- map_dfr(sites, create_all_data)%>%
                                #site %in% c("LBEA","FISH") ~ `Larimer - Old Flowers Road`,
                                site == "SAWM"  ~ `Larimer - Joe Wright Reservoir`, 
          TRUE ~ NA), 
+         precip_in = case_when(precip_in == 0 ~ NA,TRUE ~ precip_in),
          precip_site = case_when(site %in% c("FISH", "LBEA", "BLAK") ~ "Larimer - Salt Cabin", 
                                #site %in% c("LBEA","FISH") ~ `Larimer - Old Flowers Road`,
                                site == "SAWM"  ~ "Larimer - Joe Wright Reservoir", 
@@ -405,9 +466,10 @@ all_data <- map_dfr(sites, create_all_data)%>%
          )%>%
   select(-`Larimer - Salt Cabin`, -`Larimer - Old Flowers Road`, -`Larimer - Joe Wright Reservoir`,
          -`Larimer - Roaring Creek at Hwy 14`, -`Larimer - Tunnel Creek at Hwy 14`)%>%
-  filter(rowSums(!is.na(select(., -site, -DT_round_mst, -precip_site))) > 0)%>%
-  mutate(date = as.Date(DT_round_mst))
   
+  mutate(date = as.Date(DT_round_mst))%>%
+  #filter(rowSums(!is.na(select(., -site, -DT_round_mst, -precip_site,-date ))) > 0)%>%
+  select(site, DT_round_mst, date, precip_site, q_flag, everything())
 rm(all_isco, all_do, all_stage_Q_15min, DO_plot)
 ```
 ## Daily Conversion
@@ -415,27 +477,24 @@ rm(all_isco, all_do, all_stage_Q_15min, DO_plot)
 ```{r}
 
 all_data_daily <- all_data%>%
+  select(-q_flag, -Q_cfs, -sensor_stage_cm, -adjustment_cm, -corrected_stage_cm, -extrapolated_Q_cfs)%>%
   group_by(date, site)%>%
-  summarise(
-    mean_do_mgL = mean(DO_mgL, na.rm = TRUE), 
-    mean_minidot_temp_c = mean(minidot_temp_c, na.rm = TRUE), 
-    mean_ISCO_temp_c = mean(ISCO_temp_c, na.rm = TRUE),
-    mean_sc_us  = mean(sc_us, na.rm = TRUE), 
-    mean_cdom_ave = mean(cdom_ave, na.rm = TRUE),
-    mean_cdom = mean(cdom, na.rm = TRUE),
-    mean_turb_ave = mean(turb_ave, na.rm = TRUE),
-    mean_turb = mean(turb, na.rm = TRUE),
-    mean_sensor_stage_cm = mean(sensor_stage_cm, na.rm = TRUE),
-    mean_corrected_stage_cm = mean(corrected_stage_cm, na.rm = TRUE),
-    mean_Q_cfs = mean(Q_cfs, na.rm = TRUE),
-    mean_extrapolated_Q_cfs = mean(extrapolated_Q_cfs, na.rm = TRUE), 
-    mean_precip_in = sum(precip_in, na.rm = TRUE)
-  )%>%
+  summarise(across(sc_us:DO_mgL, ~ mean(.x, na.rm = TRUE)), 
+            sum_precip_in = sum(precip_in, na.rm = TRUE))%>%
   ungroup()%>%
+  left_join(select(stage_Q_daily, -a, -b, -r2, -year), by = c("date", "site"))%>%
+  mutate(sum_precip_in = case_when(sum_precip_in == 0 ~ NA, TRUE ~ sum_precip_in),
+    across(sc_us:extrapolated_Q_cfs, ~na_if(., NaN)))%>%
+ filter(rowSums(!is.na(select(., -site,-date ))) > 0)%>%
   mutate(doy = yday(date), 
          year = as.character(year(date)))
+  
 
+
+all_data <- all_data%>%
+  filter(rowSums(!is.na(select(., -site, -DT_round_mst, -precip_site,-date ))) > 0)
 ```
+
 ### Long format
 ```{r}
 all_data_long <- all_data%>%
@@ -443,7 +502,8 @@ all_data_long <- all_data%>%
   filter(!is.nan(value) & !is.na(value))
 
 all_data_daily_long <- all_data_daily%>%
-  pivot_longer(cols = c(mean_do_mgL:mean_precip_in), names_to = "parameter", values_to = "value")%>%
+  select(date, site, q_flag, doy, year,everything() )%>%
+  pivot_longer(cols = c(sc_us:extrapolated_Q_cfs), names_to = "parameter", values_to = "value")%>%
   filter(!is.nan(value) & !is.na(value))
 
 ```
@@ -451,28 +511,28 @@ all_data_daily_long <- all_data_daily%>%
 
 ## Plotting results
 ```{r}
-# View fish temp data between sensors
-ggplot(filter(all_data_daily, site == "FISH"), aes(x = doy)) +
-   geom_point(aes(y = mean_minidot_temp_c, color = "Minidot Temp", shape = year), size = 3) +
-   geom_point(aes(y = mean_ISCO_temp_c, color = "ISCO Temp", shape = year), size = 3) +
-  geom_smooth(aes(y = mean_minidot_temp_c, color = "Minidot Temp"), se = FALSE)+
-  geom_smooth(aes(y = mean_ISCO_temp_c, color = year), se = FALSE)+
-  labs(x = "Date",
-       y = "Mean temp") +
-  scale_color_manual(values = c("Minidot Temp" = "red", "ISCO Temp" = "blue", "2022" = "green", "2023" = "purple")) +
-  theme_minimal()
-+
-  facet_wrap(~site)
-
-# view all data all sensors at 5 min intervals
-ggplot(data = filter(all_data_long, parameter %in% c("precip_in", "turb_ave",  "sc_us")& site == "SAWM"), aes(x= DT_round_mst, y = value, color = site))+
-  geom_point()+
-  facet_wrap(~parameter, scales = "free_y")
-
-# view daily data
-ggplot(data = all_data_daily_long, aes(x= date, y = value, color = site))+
-  geom_point()+
-  facet_wrap(~parameter,scales = "free_y")
+# # View fish temp data between sensors
+# ggplot(filter(all_data_daily, site == "FISH"), aes(x = doy)) +
+#    geom_point(aes(y = minidot_temp_c, color = "Minidot Temp", shape = year), size = 3) +
+#    geom_point(aes(y = ISCO_temp_c, color = "ISCO Temp", shape = year), size = 3) +
+#   # geom_smooth(aes(y = mean_minidot_temp_c, color = "Minidot Temp"), se = FALSE)+
+#   # geom_smooth(aes(y = mean_ISCO_temp_c, color = year), se = FALSE)+
+#   labs(x = "Date",
+#        y = "Mean temp") +
+#   scale_color_manual(values = c("Minidot Temp" = "red", "ISCO Temp" = "blue", "2022" = "green", "2023" = "purple")) +
+#   theme_minimal()
+# +
+#   facet_wrap(~site)
+# 
+# # view all data all sensors at 5 min intervals
+ ggplot(data = filter(all_data_long, year(date) == "2022"&parameter %in% c("precip_in", "turb_ave",  "Q_cfs")& site == "SAWM"), aes(x= DT_round_mst, y = value, color = site))+
+   geom_point()+
+   facet_wrap(~parameter, scales = "free_y", ncol = 1, nrow = 3)
+# 
+# # view daily data
+# ggplot(data = filter(all_data_daily, site == "SAWM"), aes(x= date, y = Q_cfs, color = q_flag))+
+#   geom_point()+ 
+#   facet_wrap(~year, scales = "free_x", ncol = 1, nrow = 2)
 
 
 ```
