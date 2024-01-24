@@ -1,0 +1,103 @@
+---
+title: "Creating Coarse Q"
+author: "Sam Struthers- CSU ROSSyndicate"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+source("scripts/00_setup.R")
+# source all functions in the cap_rod_functions folder
+walk(list.files(path = "scripts/01_cap_rod_functions/", full.names = TRUE), source)
+
+##  2023 Field  Discharge measurements ##
+ Q_2023 <- calc_manual_q(folder_path = "data/raw/manual_Q/")%>%
+   filter(site %nin%c("BEAV", "SFM", "SAWM") )%>%
+   rename(site_code = site)
+ ## 2022
+ manual_measurements <- read_csv("data/raw/manual_stage.csv", show_col_types = FALSE)%>%
+  mutate(DT = as.POSIXct(DT, format = "%m/%d/%y %H:%M"), 
+         date = as_date(DT))%>%
+   filter(!is.na(q_cfs))%>%
+   select(site_code, date, q_cfs)
+
+```
+# Create basic liner regression
+
+```{r}
+# create a linear regression model for each site between each measurement
+format_manual_stage <- function(manual_df){
+  #grab all the sites in the dataset
+  sites <- unique(manual_df$site_code)
+  #we need to make first and last measurements for subsetting later on
+  first_last <- function(site){
+    mini <- manual_df%>%
+      #arrange by datetime
+      arrange(date)%>%
+      #subset by site
+      filter(site_code == site)%>%
+      #create first and last measurements with last measurement becoming first measurement for next site visit
+      mutate(first_meas_date = date, 
+             first_meas_Q = q_cfs)
+    mini<- mini%>%
+      mutate(#lead will take the next value in the column and default will set the last value to the last measurement for the season
+             last_meas_date = lead(first_meas_date, default = (mini$first_meas_date[nrow(mini)])),#DT + 1, 
+             last_meas_Q =  lead(first_meas_Q, default = (mini$first_meas_Q[nrow(mini)]))
+      )
+  }
+  # map over all sites and bind them together
+  formatted_df <- map_dfr(sites, first_last)
+  #return the formatted df
+  return(formatted_df)
+}
+
+
+# create a linear regression model for each site between each measurement and fill in with data for each day between each point
+create_coarseQ <- function(site, df){
+  #subset the dataframe by site
+  site_df <- df%>%
+    filter(site_code == site)%>%
+    mutate(days = as.numeric(last_meas_date - first_meas_date),
+           Q_diff = last_meas_Q - first_meas_Q, 
+           slope = Q_diff/days, 
+           manual_meas = TRUE)%>%
+    ungroup()%>%
+    pad(by = "date", interval = "day")%>%
+    fill(slope, .direction = "down")%>%
+    fill(first_meas_date, .direction = "down")%>%
+    fill(first_meas_Q, .direction = "down")%>%
+    fill(site_code, .direction = "down")%>%
+    rowwise()%>%
+    mutate(days_adj = as.numeric(date - first_meas_date ),
+           Q_cfs = slope * days_adj + first_meas_Q)%>%
+    select(site_code, date, Q_cfs,slope, days_btwn_meas = days_adj, manual_meas)
+
+  return(site_df)
+
+}
+
+Q_cleaned_2023 <- format_manual_stage(Q_2023)%>%
+  select(site_code,date,  first_meas_date, first_meas_Q, last_meas_date, last_meas_Q)
+
+
+coarseQ_2023 <- map(unique(Q_cleaned_2023$site_code), ~create_coarseQ(site = .x,df= Q_cleaned_2023))%>%
+  bind_rows()
+
+Q_cleaned_2022 <- format_manual_stage(manual_measurements)%>%
+  select(site_code,date,  first_meas_date, first_meas_Q, last_meas_date, last_meas_Q)
+
+coarseQ_2022 <- map(unique(Q_cleaned_2022$site_code), ~create_coarseQ(site = .x,df= Q_cleaned_2022))%>%
+  bind_rows()%>%
+  bind_rows(coarseQ_2023)
+
+write_csv(coarseQ_2023, "data/collated/coarseQ_2023.csv")
+
+
+
+ggplot(coarseQ_2022, aes(x = date, y = Q_cfs, color = manual_meas))+
+  geom_point()+
+  facet_wrap(~site_code, scales = "free_y")+
+  labs(color = "Manual Measurement", x = "Date", y = "Discharge (cfs)")
+
+```
+
