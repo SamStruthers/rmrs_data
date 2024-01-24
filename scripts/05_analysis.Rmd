@@ -7,15 +7,56 @@ output: html_document
 
 ```{r setup, include=FALSE}
 source("scripts/00_setup.R")
+# source all functions in the cap_rod_functions folder
+walk(list.files(path = "scripts/01_cap_rod_functions/", full.names = TRUE), source)
 
 all_data <- readRDS("data/final/all_data.rds")
 
 all_data_daily <- readRDS("data/final/all_data_daily.rds")
 
+##  2023 Field  Discharge measurements ##
+ Q_2023 <- calc_manual_q(folder_path = "data/raw/manual_Q/")%>%
+  select(site_code = site,date, q_cfs)
+#ToDo: left join with manual stage measurements by date and site
+
+
+##  2022 Field  Discharge and stage measurements ##
+manual_measurements <- read_csv("data/raw/manual_stage.csv", show_col_types = FALSE)%>%
+  mutate(DT = as.POSIXct(DT, format = "%m/%d/%y %H:%M"), 
+         date = as_date(DT))
+
+all_manual <- manual_measurements%>%
+  bind_rows(Q_2023)
 ```
 
 
 # Analysis
+
+## Stage vs Q
+
+```{r}
+SAWM <- all_data_daily%>%
+  filter(site == "SAWM")%>%
+  full_join(filter(all_manual, site_code == "SAWM"), by = c("date", "site" = "site_code" ))
+
+ggplot(data = SAWM, aes(x = date))+
+  geom_line(aes(y = mean_sensor_stage_cm), color = "blue")+
+  geom_line(aes(y = mean_corrected_stage_cm), color = "red")+
+  geom_point( aes(y = H_cm), color = "green")
+
+ggplot(data = SAWM, aes(x = date))+
+  geom_line(aes(y = Q_cfs), color = "red")+
+  geom_point( aes(y = q_cfs), color = "green")
+
+ggplot(data = filter(all_data, site == "SAWM" & !is.na(sensor_stage_cm)), aes(x = DT_round_mst))+
+  geom_line(aes(y = sensor_stage_cm), color = "blue")+
+  geom_line(aes(y = corrected_stage_cm), color = "red")+
+  geom_point(data = filter(manual_measurements, site_code == "SAWM"), aes(x= DT, y = H_cm), color = "green")
+
+
+```
+
+
 
 ## Temperature
 ```{r}
